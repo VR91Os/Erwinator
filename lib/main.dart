@@ -47,33 +47,62 @@ class ContactLink {
 }
 
 ////////////////////////////////////////////////////////////
-// ✅ ITEM (zentral für Dokumente, Fotos, etc.)
+// ✅ ITEM (FINAL – mit Erstellungshistorie)
 ////////////////////////////////////////////////////////////
 
 class Item {
-  String type; // "photo", "document", "video", "note"
-  String content; // Dateipfad oder Text
+  String type;      // "photo", "document", "video", "note"
+  String content;   // Datei oder Text
+  String name;      // Anzeigename
 
-  Item(this.type, this.content);
+  DateTime createdAt;   // ✅ wann erstellt
+  String createdBy;     // ✅ von wem erstellt
+
+  //////////////////////////////////////////////////////////
+  // ✅ Konstruktor
+  //////////////////////////////////////////////////////////
+  Item(
+    this.type,
+    this.content,
+    this.name, {
+    DateTime? createdAt,
+    this.createdBy = "User", // später echter Nutzername
+  }) : createdAt = createdAt ?? DateTime.now();
 }
 
 class Task {
+  String id;
+
   String name;
-  String description; // ✅ falls du sie schon ergänzt hast
+  String description;
+
   String status;
+
+  bool isHighPriority; // ✅ FINAL
+
   DateTime? dueDate;
 
   List<ChecklistItem> checklist;
-  List<Item> items;
+  List<String> itemRefs;
+
+  String createdBy;
+  DateTime createdAt;
+  DateTime updatedAt;
 
   Task(
+    this.id,
     this.name, {
     this.description = "",
     this.status = "offen",
+    this.isHighPriority = false, // ✅ Default
     this.dueDate,
     this.checklist = const [],
-    this.items = const [],
-  });
+    this.itemRefs = const [],
+    required this.createdBy,
+    DateTime? createdAt,
+    DateTime? updatedAt,
+  })  : createdAt = createdAt ?? DateTime.now(),
+        updatedAt = updatedAt ?? DateTime.now();
 }
 ////////////////////////////////////////////////////////////
 // ✅ GEWERK (FINAL)
@@ -214,7 +243,7 @@ class _GewerkeScreenState extends State<GewerkeScreen> {
         const Text("To-Dos", style: TextStyle(fontSize: 18)),
 
         ...current.tasks.map((task) {
-          return box(task, context);
+          return taskWidget(task, context);
         }).toList(),
 
         const SizedBox(height: 20),
@@ -263,10 +292,12 @@ class _GewerkeScreenState extends State<GewerkeScreen> {
                   // ✅ neue Aufgabe wird zum Gewerk hinzugefügt
                   gewerk.tasks.add(
                       Task(
-                      controller.text,
-                      status: "offen",
-                      dueDate: DateTime.now().add(const Duration(days: 2)),
-                    ),
+                        DateTime.now().millisecondsSinceEpoch.toString(), // ✅ id
+                        controller.text, // ✅ name
+                        status: "offen",
+                        dueDate: DateTime.now().add(const Duration(days: 2)),
+                        createdBy: "User", // ✅ wichtig!
+                      ),
                   );
                 });
 
@@ -376,31 +407,222 @@ PreferredSizeWidget buildAppBar(String title, BuildContext context, bool showBac
 }
 
 // ✅ Box (für Tasks etc.)
-Widget box(Task task, BuildContext context) {
+Widget taskWidget(Task task, BuildContext context) {
+  ////////////////////////////////////////////////////////////
+  // ✅ FARBLOGIK
+  ////////////////////////////////////////////////////////////
 
-  // ✅ Farblogik bestimmen
   Color color = Colors.white;
 
   if (task.status == "erledigt") {
+    color = Colors.green.shade200;
+  } else if (task.status == "teilweise") {
+    color = Colors.blue.shade200;
+  } else if (task.status == "archiviert") {
     color = Colors.grey.shade300;
   } 
-  else if (task.status == "teilweise") {
-    color = const Color(0xFFFFF3CD); // gelb
-  } 
-  else if (task.status == "offen" && task.dueDate != null) {
-
+  else if (task.status == "offen" && task.isHighPriority && task.dueDate != null) {
     final now = DateTime.now();
     final diff = task.dueDate!.difference(now).inDays;
 
     if (diff <= 1) {
-      color = const Color(0xFFFFD6D6); // kritisch
+      color = const Color(0xFFFFD6D6); // 🔴 kritisch
     } else if (diff <= 3) {
-      color = const Color(0xFFFFF3CD); // bald
+      color = const Color(0xFFFFF3CD); // 🟡 bald
     }
   }
 
-  // ✅ Status Icon
+  ////////////////////////////////////////////////////////////
+  // ✅ STATUS ICON
+  ////////////////////////////////////////////////////////////
+
   IconData icon;
+  switch (task.status) {
+    case "erledigt":
+      icon = Icons.check_circle;
+      break;
+    case "teilweise":
+      icon = Icons.radio_button_checked;
+      break;
+    case "archiviert":
+      icon = Icons.archive;
+      break;
+    default:
+      icon = Icons.circle_outlined;
+  }
+
+  ////////////////////////////////////////////////////////////
+  // ✅ WIDGET
+  ////////////////////////////////////////////////////////////
+
+  return GestureDetector(
+    onTap: () {
+      Navigator.push(
+        context,
+        MaterialPageRoute(
+          builder: (context) => TaskDetailScreen(task: task),
+        ),
+      );
+    },
+    child: Container(
+      margin: const EdgeInsets.only(top: 10),
+      padding: const EdgeInsets.all(12),
+      decoration: BoxDecoration(
+        color: color,
+        borderRadius: BorderRadius.circular(10),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+
+          ////////////////////////////////////////////////////////////
+          // ✅ ZEILE 1: STATUS + NAME + PRIO
+          ////////////////////////////////////////////////////////////
+
+          Row(
+            children: [
+
+              // ✅ Status klickbar
+              IconButton(
+                icon: Icon(icon),
+                onPressed: () {
+                  // Status wechseln (einfach gehalten)
+                  if (task.status == "offen") {
+                    task.status = "teilweise";
+                  } else if (task.status == "teilweise") {
+                    task.status = "erledigt";
+                  } else if (task.status == "erledigt") {
+                    task.status = "offen";
+                  }
+                },
+              ),
+
+              // ✅ Name + 🔥 Prio
+              Expanded(
+                child: Row(
+                  children: [
+                    if (task.isHighPriority)
+                      const Padding(
+                        padding: EdgeInsets.only(right: 4),
+                        child: Text("🔥"),
+                      ),
+                    Expanded(
+                      child: Text(
+                        task.name,
+                        style: const TextStyle(
+                          fontSize: 16,
+                          fontWeight: FontWeight.bold,
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ],
+          ),
+
+          ////////////////////////////////////////////////////////////
+          // ✅ BESCHREIBUNG
+          ////////////////////////////////////////////////////////////
+
+          if (task.description.isNotEmpty)
+            Padding(
+              padding: const EdgeInsets.only(left: 48, top: 4),
+              child: Text(
+                task.description,
+                style: const TextStyle(color: Colors.black87),
+              ),
+            ),
+
+          ////////////////////////////////////////////////////////////
+          // ✅ CHECKLISTE (gekürzt)
+          ////////////////////////////////////////////////////////////
+
+          ...task.checklist.take(3).map((item) {
+            return Padding(
+              padding: const EdgeInsets.only(left: 48),
+              child: Row(
+                children: [
+                  Icon(
+                    item.isDone ? Icons.check_box : Icons.check_box_outline_blank,
+                    size: 18,
+                  ),
+                  const SizedBox(width: 6),
+                  Text(item.text),
+                ],
+              ),
+            );
+          }).toList(),
+
+          ////////////////////////////////////////////////////////////
+          // ✅ DATUM + INFO
+          ////////////////////////////////////////////////////////////
+
+          Row(
+            children: [
+
+              const Spacer(),
+
+              // ✅ Datum
+              if (task.dueDate != null)
+                Text(
+                  "${task.dueDate!.day}.${task.dueDate!.month}",
+                  style: const TextStyle(fontSize: 12),
+                ),
+
+              const SizedBox(width: 10),
+
+              // ✅ Info Button (Mini Infos)
+              IconButton(
+                icon: const Icon(Icons.info_outline, size: 18),
+                onPressed: () {
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    SnackBar(
+                      content: Text(
+                        "Erstellt von: ${task.createdBy}\n"
+                        "Erstellt am: ${task.createdAt}\n"
+                        "Letzte Änderung: ${task.updatedAt}",
+                      ),
+                    ),
+                  );
+                },
+              ),
+            ],
+          ),
+
+          ////////////////////////////////////////////////////////////
+          // ✅ ACTION BUTTONS
+          ////////////////////////////////////////////////////////////
+
+          Row(
+            children: [
+
+              IconButton(
+                icon: const Icon(Icons.schedule),
+                onPressed: () {
+                  if (task.dueDate != null) {
+                    task.dueDate =
+                        task.dueDate!.add(const Duration(days: 1));
+                  }
+                },
+              ),
+
+              IconButton(
+                icon: const Icon(Icons.archive),
+                onPressed: () {
+                  task.status = "archiviert";
+                },
+              ),
+            ],
+          ),
+        ],
+      ),
+    ),
+  );
+}
+
+  // ✅ Status Icon
+  IconData icon = Icons.circle_outlined;
   switch (task.status) {
     case "erledigt":
       icon = Icons.check_circle;
