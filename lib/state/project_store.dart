@@ -1,4 +1,5 @@
 import 'package:flutter/foundation.dart';
+import 'package:supabase_flutter/supabase_flutter.dart';
 
 import '../models/audit_entry.dart';
 import '../models/gewerk.dart';
@@ -11,16 +12,26 @@ import '../models/modules/todo_module.dart';
 import '../models/project.dart';
 import '../models/task.dart';
 import '../repositories/project_repository.dart';
+import '../services/sharing_service.dart';
+import '../supabase_config.dart';
 import '../utils/id_generator.dart';
 
 const neubauStarterGewerke = ['Architekt', 'Erdbau', 'Behörde'];
 const sanierungStarterGewerke = ['Abrissfirma', 'Baumeister'];
 
 class ProjectStore extends ChangeNotifier {
-  ProjectStore({ProjectRepository? repository})
-      : _repository = repository ?? LocalProjectRepository();
+  ProjectStore({ProjectRepository? repository, SharingService? sharingService})
+      : _repository = repository ?? LocalProjectRepository(),
+        _sharingService = sharingService ?? SharingService();
 
   final ProjectRepository _repository;
+  final SharingService _sharingService;
+  final Map<String, RealtimeChannel> _projectSubscriptions = {};
+
+  // Projekt-Teilen ist nur aktiv, wenn supabase_config.dart ausgefüllt ist –
+  // sonst bleibt die App wie bisher rein lokal nutzbar.
+  bool get _sharingConfigured =>
+      supabaseUrl.isNotEmpty && supabaseAnonKey.isNotEmpty;
 
   List<Project> projects = [];
   bool isLoading = true;
@@ -35,12 +46,67 @@ class ProjectStore extends ChangeNotifier {
     }
     isLoading = false;
     notifyListeners();
+
+    if (_sharingConfigured) {
+      for (final project in projects) {
+        if (project.sharedId != null) _subscribeToProject(project.sharedId!);
+      }
+    }
+  }
+
+  // Hält ein geteiltes Projekt live synchron: Änderungen von anderen
+  // Geräten kommen sofort hier an und aktualisieren die lokale Kopie.
+  void _subscribeToProject(String sharedId) {
+    if (_projectSubscriptions.containsKey(sharedId)) return;
+    _projectSubscriptions[sharedId] =
+        _sharingService.subscribeToProjectUpdates(sharedId, (updated) {
+      final index = projects.indexWhere((p) => p.sharedId == sharedId);
+      if (index == -1) return;
+      projects[index] = updated;
+      notifyListeners();
+      _repository.saveProjects(projects).catchError((_) {});
+    });
+  }
+
+  Future<String> shareProject(String projectId) async {
+    final project = _project(projectId);
+    final sharedId = await _sharingService.shareProject(project);
+    project.sharedId = sharedId;
+    _subscribeToProject(sharedId);
+    notifyListeners();
+    await _persist();
+    return sharedId;
+  }
+
+  // Fügt ein Projekt hinzu, dem man beigetreten ist (Beitrittsanfrage
+  // wurde bestätigt) – behält die ID aus der Cloud bei, damit Live-Updates
+  // korrekt zugeordnet werden.
+  Future<void> addSharedProject(Project project) async {
+    if (projects.any((p) => p.id == project.id)) return;
+    projects.add(project);
+    if (project.sharedId != null) _subscribeToProject(project.sharedId!);
+    notifyListeners();
+    await _persist();
+  }
+
+  @override
+  void dispose() {
+    for (final channel in _projectSubscriptions.values) {
+      _sharingService.unsubscribe(channel);
+    }
+    super.dispose();
   }
 
   Future<void> _persist() async {
     try {
       await _repository.saveProjects(projects);
     } catch (_) {}
+    if (_sharingConfigured) {
+      for (final project in projects) {
+        if (project.sharedId == null) continue;
+        _sharingService.pushUpdate(project.sharedId!, project).catchError((_) {});
+      }
+    }
   }
 
   Project _project(String projectId) =>

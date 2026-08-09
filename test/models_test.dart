@@ -10,6 +10,7 @@ import 'package:baustelli/models/helper_demand.dart';
 import 'package:baustelli/models/modules/file_module.dart';
 import 'package:baustelli/models/modules/todo_module.dart';
 import 'package:baustelli/models/project.dart';
+import 'package:baustelli/models/project_member.dart';
 import 'package:baustelli/models/task.dart';
 import 'package:baustelli/models/team_member.dart';
 import 'package:baustelli/utils/kurzzeichen.dart';
@@ -273,6 +274,37 @@ void main() {
       );
       final restored = Project.fromMap(project.toMap());
       expect(restored.toMap(), project.toMap());
+    });
+
+    test('Project mit sharedId (geteiltes Projekt)', () {
+      final project = Project(
+        'p3',
+        'Geteiltes Projekt',
+        sharedId: 'cloud-uuid-123',
+      );
+      final restored = Project.fromMap(project.toMap());
+      expect(restored.toMap(), project.toMap());
+      expect(restored.sharedId, 'cloud-uuid-123');
+    });
+  });
+
+  group('ProjectMember', () {
+    test('fromMap liest eine Supabase-Zeile korrekt', () {
+      final member = ProjectMember.fromMap({
+        'id': 'm1',
+        'project_id': 'p1',
+        'user_id': 'u1',
+        'display_name': 'Anna Bauer',
+        'kurzzeichen': 'ANBA',
+        'status': 'pending',
+        'invited_at': '2026-05-01T10:00:00.000Z',
+      });
+      expect(member.id, 'm1');
+      expect(member.projectId, 'p1');
+      expect(member.userId, 'u1');
+      expect(member.displayName, 'Anna Bauer');
+      expect(member.kurzzeichen, 'ANBA');
+      expect(member.status, ProjectMember.statusPending);
     });
   });
 

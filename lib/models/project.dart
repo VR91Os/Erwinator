@@ -20,6 +20,10 @@ class Project {
   bool exportAllDatedTodos;
   bool exportPriorityTasks;
 
+  // ID der Zeile in der Supabase-Tabelle "shared_projects", sobald das
+  // Projekt geteilt wurde. null = nur lokal, nicht geteilt.
+  String? sharedId;
+
   Project(
     this.id,
     this.name, {
@@ -29,6 +33,7 @@ class Project {
     List<HelperDemand>? helperDemands,
     this.exportAllDatedTodos = false,
     this.exportPriorityTasks = false,
+    this.sharedId,
   })  : gewerke = gewerke ?? [],
         helperDemands = helperDemands ?? [];
 
@@ -41,6 +46,7 @@ class Project {
         'helperDemands': helperDemands.map((d) => d.toMap()).toList(),
         'exportAllDatedTodos': exportAllDatedTodos,
         'exportPriorityTasks': exportPriorityTasks,
+        'sharedId': sharedId,
       };
 
   factory Project.fromMap(Map<String, dynamic> map) => Project(
@@ -56,5 +62,6 @@ class Project {
             .toList(),
         exportAllDatedTodos: map['exportAllDatedTodos'] as bool? ?? false,
         exportPriorityTasks: map['exportPriorityTasks'] as bool? ?? false,
+        sharedId: map['sharedId'] as String?,
       );
 }

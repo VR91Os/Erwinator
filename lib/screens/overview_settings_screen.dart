@@ -10,6 +10,7 @@ import '../state/project_store.dart';
 import '../utils/file_export.dart';
 import '../utils/ics_export.dart';
 import '../widgets/app_bar.dart';
+import 'share_project_screen.dart';
 
 // Optionen für den "Überblick"-Reiter: steuert den Export des gesamten
 // Projekts (Daten + optional Kalenderdatei), nicht die App-weiten
@@ -107,6 +108,33 @@ class OverviewSettingsScreen extends StatelessWidget {
             onPressed: () => _exportProject(context, project),
             icon: const Icon(Icons.upload_file),
             label: const Text("Gesamtes Projekt exportieren"),
+          ),
+          const Divider(height: 40),
+          const Text(
+            "Projekt teilen",
+            style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
+          ),
+          const SizedBox(height: 4),
+          Text(
+            project.sharedId == null
+                ? "Erzeugt einen Einladungscode/QR-Code, mit dem andere "
+                    "beitreten können. Du musst jede Anfrage bestätigen."
+                : "Bereits geteilt – hier Einladungscode anzeigen oder "
+                    "offene Beitrittsanfragen bestätigen.",
+            style: const TextStyle(color: Colors.grey),
+          ),
+          const SizedBox(height: 12),
+          ElevatedButton.icon(
+            onPressed: () => Navigator.push(
+              context,
+              MaterialPageRoute(
+                builder: (context) => ShareProjectScreen(projectId: projectId),
+              ),
+            ),
+            icon: const Icon(Icons.group_add),
+            label: Text(
+              project.sharedId == null ? "Projekt teilen" : "Teilen verwalten",
+            ),
           ),
         ],
       ),

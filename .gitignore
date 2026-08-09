@@ -1,3 +1,6 @@
+# Lokale Supabase-Zugangsdaten
+lib/supabase_config.dart
+
 # Miscellaneous
 *.class
 *.log

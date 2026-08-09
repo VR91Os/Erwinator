@@ -12,6 +12,7 @@ import '../widgets/app_bar.dart';
 import '../widgets/dialogs/new_project_dialog.dart';
 import '../widgets/project_card.dart';
 import 'gewerke_screen.dart';
+import 'join_project_screen.dart';
 
 class StartScreen extends StatefulWidget {
   const StartScreen({super.key});
@@ -116,6 +117,18 @@ class _StartScreenState extends State<StartScreen> {
                     onPressed: () => _importProject(context),
                     icon: const Icon(Icons.file_open),
                     label: const Text("Projekt importieren"),
+                  ),
+                ),
+                Center(
+                  child: TextButton.icon(
+                    onPressed: () => Navigator.push(
+                      context,
+                      MaterialPageRoute(
+                        builder: (context) => const JoinProjectScreen(),
+                      ),
+                    ),
+                    icon: const Icon(Icons.group_add),
+                    label: const Text("Projekt beitreten"),
                   ),
                 ),
               ],
