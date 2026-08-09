@@ -42,3 +42,25 @@ Future<String?> importTextFile({
   }
   return null;
 }
+
+// Name + (nur nativ) lokaler Pfad einer ausgewählten Datei. Im Web ist
+// path immer null, da dort kein Dateisystempfad existiert.
+class PickedFileInfo {
+  final String name;
+  final String? path;
+  PickedFileInfo({required this.name, this.path});
+}
+
+// Öffnet den System-Dateiauswahl-Dialog für die File-Ablage. Der Inhalt
+// wird von der App selbst bewusst nicht dauerhaft gespeichert – sie
+// trackt in der Regel nur Metadaten (wer/wann/welche Version), kein
+// echtes Datei-Hosting. Ausnahme: Fotos werden nativ lokal kopiert, damit
+// die Foto-Bearbeitung (Kommentare/Messungen) funktioniert – dafür wird
+// hier zusätzlich der Quellpfad zurückgegeben. Gibt null zurück, wenn
+// abgebrochen wurde.
+Future<PickedFileInfo?> pickFileInfo() async {
+  final result = await FilePicker.pickFiles();
+  if (result == null || result.files.isEmpty) return null;
+  final file = result.files.single;
+  return PickedFileInfo(name: file.name, path: file.path);
+}

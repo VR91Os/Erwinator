@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import '../models/task.dart';
 import '../screens/task_detail_screen.dart';
 import '../utils/task_urgency.dart';
+import 'audit_info_icon.dart';
 
 Widget taskWidget(
   Task task,
@@ -14,18 +15,23 @@ Widget taskWidget(
   final color = taskUrgencyColor(task);
 
   IconData icon;
+  String statusTooltip;
   switch (task.status) {
     case "erledigt":
       icon = Icons.check_circle;
+      statusTooltip = "Erledigt – antippen, um Status zurückzusetzen";
       break;
     case "teilweise":
       icon = Icons.radio_button_checked;
+      statusTooltip = "Teilweise erledigt – antippen für 'Erledigt'";
       break;
     case "archiviert":
       icon = Icons.archive;
+      statusTooltip = "Archiviert – antippen, um Status zurückzusetzen";
       break;
     default:
       icon = Icons.circle_outlined;
+      statusTooltip = "Offen – antippen für 'Teilweise erledigt'";
   }
 
   return GestureDetector(
@@ -51,6 +57,7 @@ Widget taskWidget(
             children: [
               IconButton(
                 icon: Icon(icon),
+                tooltip: statusTooltip,
                 onPressed: onStatusTap,
               ),
               Expanded(
@@ -59,7 +66,10 @@ Widget taskWidget(
                     if (task.isHighPriority)
                       const Padding(
                         padding: EdgeInsets.only(right: 4),
-                        child: Text("🔥"),
+                        child: Tooltip(
+                          message: "Hohe Priorität",
+                          child: Text("🔥"),
+                        ),
                       ),
                     Expanded(
                       child: Text(
@@ -88,11 +98,14 @@ Widget taskWidget(
               padding: const EdgeInsets.only(left: 48),
               child: Row(
                 children: [
-                  Icon(
-                    item.isDone
-                        ? Icons.check_box
-                        : Icons.check_box_outline_blank,
-                    size: 18,
+                  Tooltip(
+                    message: item.isDone ? "Erledigt" : "Offen",
+                    child: Icon(
+                      item.isDone
+                          ? Icons.check_box
+                          : Icons.check_box_outline_blank,
+                      size: 18,
+                    ),
                   ),
                   const SizedBox(width: 6),
                   Text(item.text),
@@ -109,30 +122,19 @@ Widget taskWidget(
                   style: const TextStyle(fontSize: 12),
                 ),
               const SizedBox(width: 10),
-              IconButton(
-                icon: const Icon(Icons.info_outline, size: 18),
-                onPressed: () {
-                  ScaffoldMessenger.of(context).showSnackBar(
-                    SnackBar(
-                      content: Text(
-                        "Erstellt von: ${task.createdBy}\n"
-                        "Erstellt am: ${task.createdAt}\n"
-                        "Letzte Änderung: ${task.updatedAt}",
-                      ),
-                    ),
-                  );
-                },
-              ),
+              AuditInfoIcon(history: task.history),
             ],
           ),
           Row(
             children: [
               IconButton(
                 icon: const Icon(Icons.schedule),
+                tooltip: "Fälligkeit um 1 Tag verschieben",
                 onPressed: onShiftDate,
               ),
               IconButton(
                 icon: const Icon(Icons.archive),
+                tooltip: "Aufgabe archivieren",
                 onPressed: onArchive,
               ),
             ],

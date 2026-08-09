@@ -1,3 +1,4 @@
+import 'audit_entry.dart';
 import 'checklist_item.dart';
 
 class Task {
@@ -19,6 +20,9 @@ class Task {
   DateTime createdAt;
   DateTime updatedAt;
 
+  // Verlauf: wer hat die Aufgabe erstellt/bearbeitet/abgehakt.
+  List<AuditEntry> history;
+
   Task(
     this.id,
     this.name, {
@@ -31,10 +35,12 @@ class Task {
     required this.createdBy,
     DateTime? createdAt,
     DateTime? updatedAt,
+    List<AuditEntry>? history,
   })  : checklist = checklist ?? [],
         itemRefs = itemRefs ?? [],
         createdAt = createdAt ?? DateTime.now(),
-        updatedAt = updatedAt ?? DateTime.now();
+        updatedAt = updatedAt ?? DateTime.now(),
+        history = history ?? [];
 
   Map<String, dynamic> toMap() => {
         'id': id,
@@ -48,6 +54,7 @@ class Task {
         'createdBy': createdBy,
         'createdAt': createdAt.toIso8601String(),
         'updatedAt': updatedAt.toIso8601String(),
+        'history': history.map((h) => h.toMap()).toList(),
       };
 
   factory Task.fromMap(Map<String, dynamic> map) => Task(
@@ -68,5 +75,8 @@ class Task {
         createdBy: map['createdBy'] as String? ?? "User",
         createdAt: DateTime.parse(map['createdAt'] as String),
         updatedAt: DateTime.parse(map['updatedAt'] as String),
+        history: (map['history'] as List<dynamic>? ?? [])
+            .map((e) => AuditEntry.fromMap(e as Map<String, dynamic>))
+            .toList(),
       );
 }

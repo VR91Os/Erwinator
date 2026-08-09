@@ -7,7 +7,9 @@ class ModuleCard extends StatelessWidget {
   final String projectId;
   final String gewerkId;
   final String moduleId;
-  final String title;
+  final String icon;
+  final String defaultTitle;
+  final String label;
   final Widget child;
 
   const ModuleCard({
@@ -15,12 +17,54 @@ class ModuleCard extends StatelessWidget {
     required this.projectId,
     required this.gewerkId,
     required this.moduleId,
-    required this.title,
+    required this.icon,
+    required this.defaultTitle,
+    this.label = '',
     required this.child,
   });
 
+  void _showRenameDialog(BuildContext context) {
+    final controller = TextEditingController(text: label);
+    showDialog(
+      context: context,
+      builder: (dialogContext) {
+        return AlertDialog(
+          title: const Text("Modul umbenennen"),
+          content: TextField(
+            controller: controller,
+            decoration: InputDecoration(
+              labelText: "Name",
+              hintText: defaultTitle,
+            ),
+            autofocus: true,
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(dialogContext),
+              child: const Text("Abbrechen"),
+            ),
+            ElevatedButton(
+              onPressed: () {
+                context.read<ProjectStore>().renameModule(
+                      projectId,
+                      gewerkId,
+                      moduleId,
+                      controller.text.trim(),
+                    );
+                Navigator.pop(dialogContext);
+              },
+              child: const Text("Speichern"),
+            ),
+          ],
+        );
+      },
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
+    final title = "$icon ${label.isEmpty ? defaultTitle : label}";
+
     return Container(
       padding: const EdgeInsets.all(12),
       decoration: BoxDecoration(
@@ -38,6 +82,11 @@ class ModuleCard extends StatelessWidget {
                   title,
                   style: const TextStyle(fontWeight: FontWeight.bold),
                 ),
+              ),
+              IconButton(
+                icon: const Icon(Icons.edit_outlined, size: 20),
+                tooltip: "Modul umbenennen",
+                onPressed: () => _showRenameDialog(context),
               ),
               IconButton(
                 icon: const Icon(Icons.delete_outline, size: 20),

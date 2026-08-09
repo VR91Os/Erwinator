@@ -1,7 +1,10 @@
 import 'package:flutter/foundation.dart';
 
 import '../models/app_settings.dart';
+import '../models/team_member.dart';
 import '../repositories/settings_repository.dart';
+import '../utils/id_generator.dart';
+import '../utils/kurzzeichen.dart';
 
 class SettingsStore extends ChangeNotifier {
   SettingsStore({SettingsRepository? repository})
@@ -11,6 +14,11 @@ class SettingsStore extends ChangeNotifier {
 
   AppSettings settings = AppSettings();
   bool isLoading = true;
+
+  // Kurzzeichen für Aktionen des lokalen Nutzers, mit Fallback solange kein
+  // Profil angelegt wurde.
+  String get currentUserKurzzeichen =>
+      settings.userInitials.isEmpty ? '??' : settings.userInitials;
 
   Future<void> init() async {
     // Auf Plattformen ohne Dateisystem-Zugriff (z.B. Web) bleibt die App
@@ -42,28 +50,51 @@ class SettingsStore extends ChangeNotifier {
     await _persist();
   }
 
+  Future<void> setShowAuthorInfo(bool value) async {
+    settings.showAuthorInfo = value;
+    notifyListeners();
+    await _persist();
+  }
+
+  // Das Kurzzeichen wird immer automatisch aus dem Namen erzeugt (2
+  // Buchstaben Vorname + 2 Buchstaben Nachname) und bei Kollision mit einem
+  // bereits bekannten Teammitglied eindeutig gemacht.
   Future<void> updateProfile({
     required String userName,
-    required String userInitials,
     required String googleAccountEmail,
   }) async {
     settings.userName = userName;
-    settings.userInitials = userInitials;
+    settings.userInitials = generateKurzzeichen(
+      userName,
+      settings.invitedUsers.map((u) => u.kurzzeichen),
+    );
     settings.googleAccountEmail = googleAccountEmail;
     notifyListeners();
     await _persist();
   }
 
-  Future<void> addInvitedUser(String value) async {
-    final trimmed = value.trim();
-    if (trimmed.isEmpty || settings.invitedUsers.contains(trimmed)) return;
-    settings.invitedUsers.add(trimmed);
+  Future<void> addInvitedUser({
+    required String name,
+    String email = '',
+  }) async {
+    final trimmedName = name.trim();
+    if (trimmedName.isEmpty) return;
+    final existingKurzzeichen = [
+      settings.userInitials,
+      ...settings.invitedUsers.map((u) => u.kurzzeichen),
+    ];
+    settings.invitedUsers.add(TeamMember(
+      id: newId(),
+      name: trimmedName,
+      email: email.trim(),
+      kurzzeichen: generateKurzzeichen(trimmedName, existingKurzzeichen),
+    ));
     notifyListeners();
     await _persist();
   }
 
-  Future<void> removeInvitedUser(String value) async {
-    settings.invitedUsers.remove(value);
+  Future<void> removeInvitedUser(String id) async {
+    settings.invitedUsers.removeWhere((u) => u.id == id);
     notifyListeners();
     await _persist();
   }

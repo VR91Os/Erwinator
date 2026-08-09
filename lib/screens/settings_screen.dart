@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 
 import '../state/settings_store.dart';
+import '../utils/kurzzeichen.dart';
 import '../widgets/app_bar.dart';
 
 class SettingsScreen extends StatefulWidget {
@@ -13,7 +14,6 @@ class SettingsScreen extends StatefulWidget {
 
 class _SettingsScreenState extends State<SettingsScreen> {
   late final TextEditingController _nameController;
-  late final TextEditingController _initialsController;
   late final TextEditingController _googleController;
 
   @override
@@ -21,15 +21,14 @@ class _SettingsScreenState extends State<SettingsScreen> {
     super.initState();
     final settings = context.read<SettingsStore>().settings;
     _nameController = TextEditingController(text: settings.userName);
-    _initialsController = TextEditingController(text: settings.userInitials);
     _googleController =
         TextEditingController(text: settings.googleAccountEmail);
+    _nameController.addListener(() => setState(() {}));
   }
 
   @override
   void dispose() {
     _nameController.dispose();
-    _initialsController.dispose();
     _googleController.dispose();
     super.dispose();
   }
@@ -37,7 +36,6 @@ class _SettingsScreenState extends State<SettingsScreen> {
   void _saveProfile() {
     context.read<SettingsStore>().updateProfile(
           userName: _nameController.text.trim(),
-          userInitials: _initialsController.text.trim(),
           googleAccountEmail: _googleController.text.trim(),
         );
     ScaffoldMessenger.of(context).showSnackBar(
@@ -46,15 +44,27 @@ class _SettingsScreenState extends State<SettingsScreen> {
   }
 
   void _showInviteDialog() {
-    final controller = TextEditingController();
+    final nameController = TextEditingController();
+    final emailController = TextEditingController();
     showDialog(
       context: context,
       builder: (dialogContext) {
         return AlertDialog(
           title: const Text("Nutzer zum Teilen einladen"),
-          content: TextField(
-            controller: controller,
-            decoration: const InputDecoration(hintText: "E-Mail-Adresse"),
+          content: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              TextField(
+                controller: nameController,
+                decoration: const InputDecoration(labelText: "Name *"),
+              ),
+              const SizedBox(height: 10),
+              TextField(
+                controller: emailController,
+                decoration:
+                    const InputDecoration(labelText: "E-Mail-Adresse"),
+              ),
+            ],
           ),
           actions: [
             TextButton(
@@ -63,10 +73,11 @@ class _SettingsScreenState extends State<SettingsScreen> {
             ),
             ElevatedButton(
               onPressed: () {
-                if (controller.text.trim().isEmpty) return;
-                context
-                    .read<SettingsStore>()
-                    .addInvitedUser(controller.text.trim());
+                if (nameController.text.trim().isEmpty) return;
+                context.read<SettingsStore>().addInvitedUser(
+                      name: nameController.text.trim(),
+                      email: emailController.text.trim(),
+                    );
                 Navigator.pop(dialogContext);
               },
               child: const Text("Einladen"),
@@ -80,6 +91,12 @@ class _SettingsScreenState extends State<SettingsScreen> {
   @override
   Widget build(BuildContext context) {
     final settings = context.watch<SettingsStore>().settings;
+    final kurzzeichenPreview = _nameController.text.trim().isEmpty
+        ? '—'
+        : generateKurzzeichen(
+            _nameController.text.trim(),
+            settings.invitedUsers.map((u) => u.kurzzeichen),
+          );
 
     return Scaffold(
       appBar: buildAppBar("Optionen", context, true),
@@ -94,6 +111,18 @@ class _SettingsScreenState extends State<SettingsScreen> {
               context
                   .read<SettingsStore>()
                   .setJumpToLastProject(value ?? false);
+            },
+          ),
+          CheckboxListTile(
+            contentPadding: EdgeInsets.zero,
+            title: const Text("Ersteller/Bearbeiter anzeigen"),
+            subtitle: const Text(
+              "Kleines (i)-Symbol in den Modulen zeigt, wer etwas erstellt, "
+              "bearbeitet oder abgehakt hat.",
+            ),
+            value: settings.showAuthorInfo,
+            onChanged: (value) {
+              context.read<SettingsStore>().setShowAuthorInfo(value ?? true);
             },
           ),
           const Divider(height: 32),
@@ -113,9 +142,9 @@ class _SettingsScreenState extends State<SettingsScreen> {
             decoration: const InputDecoration(labelText: "Name"),
           ),
           const SizedBox(height: 10),
-          TextField(
-            controller: _initialsController,
-            decoration: const InputDecoration(labelText: "Namenskürzel"),
+          Text(
+            "Namenskürzel (automatisch): $kurzzeichenPreview",
+            style: const TextStyle(color: Colors.grey),
           ),
           const SizedBox(height: 10),
           TextField(
@@ -154,12 +183,19 @@ class _SettingsScreenState extends State<SettingsScreen> {
           ...settings.invitedUsers.map((user) {
             return ListTile(
               contentPadding: EdgeInsets.zero,
-              leading: const Icon(Icons.person_outline),
-              title: Text(user),
+              leading: CircleAvatar(
+                radius: 16,
+                child: Text(
+                  user.kurzzeichen,
+                  style: const TextStyle(fontSize: 11),
+                ),
+              ),
+              title: Text(user.name),
+              subtitle: user.email.isEmpty ? null : Text(user.email),
               trailing: IconButton(
                 icon: const Icon(Icons.delete_outline),
                 onPressed: () =>
-                    context.read<SettingsStore>().removeInvitedUser(user),
+                    context.read<SettingsStore>().removeInvitedUser(user.id),
               ),
             );
           }),

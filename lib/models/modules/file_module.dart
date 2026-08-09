@@ -1,3 +1,5 @@
+import '../audit_entry.dart';
+import '../image_annotation.dart';
 import 'gewerk_module.dart';
 
 class FileVersion {
@@ -39,18 +41,35 @@ class FileEntry {
   String fileType;
   List<FileVersion> versions;
 
+  // Verlauf: wer hat hochgeladen/eine neue Version hinzugefügt.
+  List<AuditEntry> history;
+
+  // Lokaler Dateipfad des tatsächlichen Bildes für die Foto-Bearbeitung
+  // (Kommentar-Pins/Messungen). Nur auf nativen Plattformen befüllt – im
+  // Web gibt es kein Dateisystem dafür, dort bleibt es null.
+  String? localImagePath;
+  List<ImageAnnotation> annotations;
+
   FileEntry({
     required this.id,
     required this.name,
     required this.fileType,
     List<FileVersion>? versions,
-  }) : versions = versions ?? [];
+    List<AuditEntry>? history,
+    this.localImagePath,
+    List<ImageAnnotation>? annotations,
+  })  : versions = versions ?? [],
+        history = history ?? [],
+        annotations = annotations ?? [];
 
   Map<String, dynamic> toMap() => {
         'id': id,
         'name': name,
         'fileType': fileType,
         'versions': versions.map((v) => v.toMap()).toList(),
+        'history': history.map((h) => h.toMap()).toList(),
+        'localImagePath': localImagePath,
+        'annotations': annotations.map((a) => a.toMap()).toList(),
       };
 
   factory FileEntry.fromMap(Map<String, dynamic> map) => FileEntry(
@@ -60,6 +79,13 @@ class FileEntry {
         versions: (map['versions'] as List<dynamic>? ?? [])
             .map((e) => FileVersion.fromMap(e as Map<String, dynamic>))
             .toList(),
+        history: (map['history'] as List<dynamic>? ?? [])
+            .map((e) => AuditEntry.fromMap(e as Map<String, dynamic>))
+            .toList(),
+        localImagePath: map['localImagePath'] as String?,
+        annotations: (map['annotations'] as List<dynamic>? ?? [])
+            .map((e) => ImageAnnotation.fromMap(e as Map<String, dynamic>))
+            .toList(),
       );
 }
 
@@ -68,7 +94,8 @@ class FileModule extends GewerkModule {
 
   List<FileEntry> entries;
 
-  FileModule(super.id, {List<FileEntry>? entries}) : entries = entries ?? [];
+  FileModule(super.id, {super.label, List<FileEntry>? entries})
+      : entries = entries ?? [];
 
   @override
   String get type => moduleType;
@@ -77,11 +104,13 @@ class FileModule extends GewerkModule {
   Map<String, dynamic> toMap() => {
         'type': type,
         'id': id,
+        'label': label,
         'entries': entries.map((e) => e.toMap()).toList(),
       };
 
   factory FileModule.fromMap(Map<String, dynamic> map) => FileModule(
         map['id'] as String,
+        label: map['label'] as String? ?? '',
         entries: (map['entries'] as List<dynamic>? ?? [])
             .map((e) => FileEntry.fromMap(e as Map<String, dynamic>))
             .toList(),

@@ -5,7 +5,11 @@ import 'todo_module.dart';
 abstract class GewerkModule {
   final String id;
 
-  GewerkModule(this.id);
+  // Frei vergebbarer Anzeigename des Moduls (z.B. um mehrere Todo-Listen
+  // im selben Gewerk zu unterscheiden). Leer = Standard-Bezeichnung.
+  String label;
+
+  GewerkModule(this.id, {this.label = ''});
 
   String get type;
 

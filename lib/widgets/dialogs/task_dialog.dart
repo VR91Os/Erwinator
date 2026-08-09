@@ -1,8 +1,10 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 
+import '../../models/audit_entry.dart';
 import '../../models/task.dart';
 import '../../state/project_store.dart';
+import '../../state/settings_store.dart';
 import '../../utils/id_generator.dart';
 
 void showTaskDialog(
@@ -14,6 +16,7 @@ void showTaskDialog(
   final nameController = TextEditingController();
   final descriptionController = TextEditingController();
   final store = context.read<ProjectStore>();
+  final actor = context.read<SettingsStore>().currentUserKurzzeichen;
 
   bool isHighPriority = false;
   DateTime? dueDate;
@@ -122,7 +125,10 @@ void showTaskDialog(
                     description: descriptionController.text.trim(),
                     isHighPriority: isHighPriority,
                     dueDate: dueDate,
-                    createdBy: "User",
+                    createdBy: actor,
+                    history: [
+                      AuditEntry(kurzzeichen: actor, action: 'erstellt'),
+                    ],
                   );
 
                   store.addTaskToTodoModule(

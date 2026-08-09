@@ -1,7 +1,6 @@
 import 'dart:convert';
-import 'dart:io';
 
-import 'package:path_provider/path_provider.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 
 import '../models/project.dart';
 
@@ -10,22 +9,17 @@ abstract class ProjectRepository {
   Future<void> saveProjects(List<Project> projects);
 }
 
+// Nutzt SharedPreferences statt direktem Datei-Zugriff, damit die
+// Speicherung auf allen Plattformen funktioniert – inklusive Web, wo
+// dart:io nicht verfügbar ist.
 class LocalProjectRepository implements ProjectRepository {
-  static const _fileName = 'baustelli_data.json';
-
-  Future<File> _file() async {
-    final dir = await getApplicationDocumentsDirectory();
-    return File('${dir.path}/$_fileName');
-  }
+  static const _key = 'baustelli_data';
 
   @override
   Future<List<Project>> loadProjects() async {
-    final file = await _file();
-    if (!await file.exists()) {
-      return [];
-    }
-    final content = await file.readAsString();
-    if (content.trim().isEmpty) {
+    final prefs = await SharedPreferences.getInstance();
+    final content = prefs.getString(_key);
+    if (content == null || content.trim().isEmpty) {
       return [];
     }
     final decoded = jsonDecode(content) as List<dynamic>;
@@ -36,8 +30,8 @@ class LocalProjectRepository implements ProjectRepository {
 
   @override
   Future<void> saveProjects(List<Project> projects) async {
-    final file = await _file();
+    final prefs = await SharedPreferences.getInstance();
     final encoded = jsonEncode(projects.map((p) => p.toMap()).toList());
-    await file.writeAsString(encoded);
+    await prefs.setString(_key, encoded);
   }
 }

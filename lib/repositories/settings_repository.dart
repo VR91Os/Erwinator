@@ -1,7 +1,6 @@
 import 'dart:convert';
-import 'dart:io';
 
-import 'package:path_provider/path_provider.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 
 import '../models/app_settings.dart';
 
@@ -10,22 +9,17 @@ abstract class SettingsRepository {
   Future<void> saveSettings(AppSettings settings);
 }
 
+// Nutzt SharedPreferences statt direktem Datei-Zugriff, damit die
+// Speicherung auf allen Plattformen funktioniert – inklusive Web, wo
+// dart:io nicht verfügbar ist.
 class LocalSettingsRepository implements SettingsRepository {
-  static const _fileName = 'baustelli_settings.json';
-
-  Future<File> _file() async {
-    final dir = await getApplicationDocumentsDirectory();
-    return File('${dir.path}/$_fileName');
-  }
+  static const _key = 'baustelli_settings';
 
   @override
   Future<AppSettings> loadSettings() async {
-    final file = await _file();
-    if (!await file.exists()) {
-      return AppSettings();
-    }
-    final content = await file.readAsString();
-    if (content.trim().isEmpty) {
+    final prefs = await SharedPreferences.getInstance();
+    final content = prefs.getString(_key);
+    if (content == null || content.trim().isEmpty) {
       return AppSettings();
     }
     final decoded = jsonDecode(content) as Map<String, dynamic>;
@@ -34,7 +28,7 @@ class LocalSettingsRepository implements SettingsRepository {
 
   @override
   Future<void> saveSettings(AppSettings settings) async {
-    final file = await _file();
-    await file.writeAsString(jsonEncode(settings.toMap()));
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setString(_key, jsonEncode(settings.toMap()));
   }
 }

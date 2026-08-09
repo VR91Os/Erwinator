@@ -3,6 +3,7 @@ import 'package:provider/provider.dart';
 
 import '../../models/modules/todo_module.dart';
 import '../../state/project_store.dart';
+import '../../state/settings_store.dart';
 import '../dialogs/task_dialog.dart';
 import '../task_widget.dart';
 import 'module_card.dart';
@@ -22,12 +23,15 @@ class TodoModuleWidget extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final store = context.read<ProjectStore>();
+    final actor = context.watch<SettingsStore>().currentUserKurzzeichen;
 
     return ModuleCard(
       projectId: projectId,
       gewerkId: gewerkId,
       moduleId: module.id,
-      title: "✅ Todo-Liste",
+      icon: "✅",
+      defaultTitle: "Todo-Liste",
+      label: module.label,
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
@@ -36,11 +40,14 @@ class TodoModuleWidget extends StatelessWidget {
               task,
               context,
               onStatusTap: () => store.updateTaskStatus(
-                  projectId, gewerkId, module.id, task.id),
+                  projectId, gewerkId, module.id, task.id,
+                  actor: actor),
               onShiftDate: () => store.shiftTaskDueDate(
-                  projectId, gewerkId, module.id, task.id),
-              onArchive: () =>
-                  store.archiveTask(projectId, gewerkId, module.id, task.id),
+                  projectId, gewerkId, module.id, task.id,
+                  actor: actor),
+              onArchive: () => store.archiveTask(
+                  projectId, gewerkId, module.id, task.id,
+                  actor: actor),
             );
           }),
           const SizedBox(height: 10),

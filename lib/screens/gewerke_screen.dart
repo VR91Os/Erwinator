@@ -14,11 +14,13 @@ import '../widgets/modules/contact_module_widget.dart';
 import '../widgets/modules/file_module_widget.dart';
 import '../widgets/modules/module_picker_dialog.dart';
 import '../widgets/modules/todo_module_widget.dart';
+import '../widgets/file_archive_tab.dart';
 import '../widgets/overview_tab.dart';
 import 'gewerk_settings_screen.dart';
 import 'overview_settings_screen.dart';
 
 const _overviewTabId = '__overview__';
+const _fileArchiveTabId = '__files__';
 
 class GewerkeScreen extends StatefulWidget {
   final String projectId;
@@ -41,11 +43,15 @@ class _GewerkeScreenState extends State<GewerkeScreen> {
 
     final selectedGewerkIndex =
         project.gewerke.indexWhere((g) => g.id == selectedTabId);
-    final isOverview =
-        selectedTabId == _overviewTabId || selectedGewerkIndex == -1;
-    final selectedGewerk = isOverview ? null : project.gewerke[selectedGewerkIndex];
+    final isFileArchive = selectedTabId == _fileArchiveTabId;
+    final isOverview = !isFileArchive &&
+        (selectedTabId == _overviewTabId || selectedGewerkIndex == -1);
+    final selectedGewerk =
+        (isOverview || isFileArchive) ? null : project.gewerke[selectedGewerkIndex];
 
-    if (selectedGewerkIndex == -1 && selectedTabId != _overviewTabId) {
+    if (selectedGewerkIndex == -1 &&
+        selectedTabId != _overviewTabId &&
+        selectedTabId != _fileArchiveTabId) {
       // Reiter wurde entfernt -> zurück zu Überblick.
       WidgetsBinding.instance.addPostFrameCallback((_) {
         if (mounted) setState(() => selectedTabId = _overviewTabId);
@@ -54,16 +60,23 @@ class _GewerkeScreenState extends State<GewerkeScreen> {
 
     return Scaffold(
       // ✅ Titel = wo man sich befindet: Überblick -> Projektname,
-      // sonst -> Name des gewählten Gewerk-Reiters.
+      // Dateiablage -> fester Titel, sonst -> Name des Gewerk-Reiters.
       appBar: buildAppBar(
-        isOverview ? project.name : selectedGewerk!.name,
+        isOverview
+            ? project.name
+            : isFileArchive
+                ? "Dateiablage"
+                : selectedGewerk!.name,
         context,
         true,
         // ✅ Plus erzeugt immer die Ebene direkt unter der aktuellen Ansicht.
+        // In der Dateiablage gibt es keine eigene "Anlegen"-Aktion.
         onCreate: isOverview
             ? () => showNewGewerkDialog(context, project.id)
-            : () =>
-                showModulePickerDialog(context, project.id, selectedGewerk!.id),
+            : isFileArchive
+                ? null
+                : () => showModulePickerDialog(
+                    context, project.id, selectedGewerk!.id),
         createTooltip: isOverview ? "Neues Gewerk" : "Modul hinzufügen",
         // ✅ Optionen unterscheiden sich je Ebene: Überblick -> Export,
         // Gewerk-Reiter -> umbenennen/löschen (nicht die App-Optionen).
@@ -75,16 +88,18 @@ class _GewerkeScreenState extends State<GewerkeScreen> {
                         OverviewSettingsScreen(projectId: project.id),
                   ),
                 )
-            : () => Navigator.push(
-                  context,
-                  MaterialPageRoute(
-                    builder: (context) => GewerkSettingsScreen(
-                      projectId: project.id,
-                      gewerkId: selectedGewerk!.id,
-                      initialName: selectedGewerk.name,
+            : isFileArchive
+                ? null
+                : () => Navigator.push(
+                      context,
+                      MaterialPageRoute(
+                        builder: (context) => GewerkSettingsScreen(
+                          projectId: project.id,
+                          gewerkId: selectedGewerk!.id,
+                          initialName: selectedGewerk.name,
+                        ),
+                      ),
                     ),
-                  ),
-                ),
       ),
       body: Column(
         children: [
@@ -105,6 +120,13 @@ class _GewerkeScreenState extends State<GewerkeScreen> {
                     onTap: () => setState(() => selectedTabId = gewerk.id),
                   );
                 }),
+                // ✅ Dateiablage bleibt immer der letzte Reiter, ganz rechts.
+                _tabChip(
+                  label: "Dateiablage",
+                  selected: isFileArchive,
+                  onTap: () =>
+                      setState(() => selectedTabId = _fileArchiveTabId),
+                ),
               ],
             ),
           ),
@@ -113,7 +135,13 @@ class _GewerkeScreenState extends State<GewerkeScreen> {
               padding: const EdgeInsets.all(16),
               child: isOverview
                   ? OverviewTab(project: project)
-                  : _buildGewerkContent(project, selectedGewerk!),
+                  : isFileArchive
+                      ? FileArchiveTab(
+                          project: project,
+                          onOpenGewerk: (gewerkId) =>
+                              setState(() => selectedTabId = gewerkId),
+                        )
+                      : _buildGewerkContent(project, selectedGewerk!),
             ),
           ),
         ],
