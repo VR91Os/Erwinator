@@ -8,6 +8,7 @@ import '../models/modules/gewerk_module.dart';
 import '../models/modules/todo_module.dart';
 import '../models/project.dart';
 import '../state/project_store.dart';
+import '../state/settings_store.dart';
 import '../widgets/app_bar.dart';
 import '../widgets/dialogs/new_gewerk_dialog.dart';
 import '../widgets/modules/contact_module_widget.dart';
@@ -17,11 +18,13 @@ import '../widgets/modules/todo_module_widget.dart';
 import '../utils/task_urgency.dart';
 import '../widgets/file_archive_tab.dart';
 import '../widgets/overview_tab.dart';
+import '../widgets/time_tracking_section.dart';
 import 'gewerk_settings_screen.dart';
 import 'overview_settings_screen.dart';
 
 const _overviewTabId = '__overview__';
 const _fileArchiveTabId = '__files__';
+const _timeTrackingTabId = '__time__';
 
 class GewerkeScreen extends StatefulWidget {
   final String projectId;
@@ -37,23 +40,49 @@ class _GewerkeScreenState extends State<GewerkeScreen> {
   String selectedTabId = _overviewTabId;
 
   @override
+  void initState() {
+    super.initState();
+    // ✅ "Ich bin auf der Baustelle" (V1): beim Öffnen des Projekts wird der
+    // heutige Tag nachgezogen, falls jemand dauerhaft als anwesend markiert
+    // ist – ohne dass dafür ein Helfer eingetragen werden muss.
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) return;
+      final actor =
+          context.read<SettingsStore>().currentUserKurzzeichen;
+      final store = context.read<ProjectStore>();
+      store.syncOnSitePresenceForToday(widget.projectId, actor: actor);
+      // ✅ Räumt beim Öffnen abgelaufene archivierte Aufgaben endgültig
+      // weg, falls in den Todo-Listen-Optionen aktiviert.
+      store.cleanupExpiredArchivedTasks(widget.projectId);
+    });
+  }
+
+  @override
   Widget build(BuildContext context) {
     final store = context.watch<ProjectStore>();
+    final settingsStore = context.watch<SettingsStore>();
     final project =
         store.projects.firstWhere((p) => p.id == widget.projectId);
 
     final selectedGewerkIndex =
         project.gewerke.indexWhere((g) => g.id == selectedTabId);
     final isFileArchive = selectedTabId == _fileArchiveTabId;
+    final isTimeTracking =
+        selectedTabId == _timeTrackingTabId && project.timeTrackingEnabled;
     final isOverview = !isFileArchive &&
+        !isTimeTracking &&
         (selectedTabId == _overviewTabId || selectedGewerkIndex == -1);
-    final selectedGewerk =
-        (isOverview || isFileArchive) ? null : project.gewerke[selectedGewerkIndex];
+    final selectedGewerk = (isOverview || isFileArchive || isTimeTracking)
+        ? null
+        : project.gewerke[selectedGewerkIndex];
 
-    if (selectedGewerkIndex == -1 &&
-        selectedTabId != _overviewTabId &&
-        selectedTabId != _fileArchiveTabId) {
-      // Reiter wurde entfernt -> zurück zu Überblick.
+    final tabStillValid = selectedTabId == _overviewTabId ||
+        selectedTabId == _fileArchiveTabId ||
+        isTimeTracking ||
+        selectedGewerkIndex != -1;
+    if (!tabStillValid) {
+      // Reiter wurde entfernt oder Zeitstatistik deaktiviert -> zurück zu
+      // Überblick.
       WidgetsBinding.instance.addPostFrameCallback((_) {
         if (mounted) setState(() => selectedTabId = _overviewTabId);
       });
@@ -61,24 +90,30 @@ class _GewerkeScreenState extends State<GewerkeScreen> {
 
     return Scaffold(
       // ✅ Titel = wo man sich befindet: Überblick -> Projektname,
-      // Dateiablage -> fester Titel, sonst -> Name des Gewerk-Reiters.
+      // Dateiablage/Zeitstatistik -> fester Titel, sonst -> Name des
+      // Gewerk-Reiters.
       appBar: buildAppBar(
         isOverview
             ? project.name
             : isFileArchive
                 ? "Dateiablage"
-                : selectedGewerk!.name,
+                : isTimeTracking
+                    ? "Zeitstatistik"
+                    : selectedGewerk!.name,
         context,
         true,
         // ✅ Plus erzeugt immer die Ebene direkt unter der aktuellen Ansicht.
-        // In der Dateiablage gibt es keine eigene "Anlegen"-Aktion.
+        // In der Dateiablage/Zeitstatistik gibt es keine eigene
+        // "Anlegen"-Aktion.
         onCreate: isOverview
             ? () => showNewGewerkDialog(context, project.id)
-            : isFileArchive
+            : (isFileArchive || isTimeTracking)
                 ? null
                 : () => showModulePickerDialog(
                     context, project.id, selectedGewerk!.id),
         createTooltip: isOverview ? "Neues Gewerk" : "Modul hinzufügen",
+        showSettingsBadge: isOverview &&
+            !settingsStore.hasSeenFeatureHint('time_tracking'),
         // ✅ Optionen unterscheiden sich je Ebene: Überblick -> Export,
         // Gewerk-Reiter -> umbenennen/löschen (nicht die App-Optionen).
         onSettings: isOverview
@@ -89,7 +124,7 @@ class _GewerkeScreenState extends State<GewerkeScreen> {
                         OverviewSettingsScreen(projectId: project.id),
                   ),
                 )
-            : isFileArchive
+            : (isFileArchive || isTimeTracking)
                 ? null
                 : () => Navigator.push(
                       context,
@@ -125,7 +160,8 @@ class _GewerkeScreenState extends State<GewerkeScreen> {
                     onTap: () => setState(() => selectedTabId = gewerk.id),
                   );
                 }),
-                // ✅ Dateiablage bleibt immer der letzte Reiter, ganz rechts.
+                // ✅ Dateiablage ist immer der letzte feste System-Reiter vor
+                // der optionalen Zeitstatistik, ganz rechts.
                 _tabChip(
                   label: "Dateiablage",
                   selected: isFileArchive,
@@ -133,6 +169,15 @@ class _GewerkeScreenState extends State<GewerkeScreen> {
                   onTap: () =>
                       setState(() => selectedTabId = _fileArchiveTabId),
                 ),
+                // ✅ Nur sichtbar, wenn in den Überblick-Optionen aktiviert.
+                if (project.timeTrackingEnabled)
+                  _tabChip(
+                    label: "Zeitstatistik",
+                    selected: isTimeTracking,
+                    accent: true,
+                    onTap: () =>
+                        setState(() => selectedTabId = _timeTrackingTabId),
+                  ),
               ],
             ),
           ),
@@ -147,7 +192,9 @@ class _GewerkeScreenState extends State<GewerkeScreen> {
                           onOpenGewerk: (gewerkId) =>
                               setState(() => selectedTabId = gewerkId),
                         )
-                      : _buildGewerkContent(project, selectedGewerk!),
+                      : isTimeTracking
+                          ? TimeTrackingSection(project: project)
+                          : _buildGewerkContent(project, selectedGewerk!),
             ),
           ),
         ],

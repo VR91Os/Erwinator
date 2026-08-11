@@ -11,10 +11,12 @@ import '../models/modules/gewerk_module.dart';
 import '../models/modules/todo_module.dart';
 import '../models/project.dart';
 import '../models/task.dart';
+import '../models/time_tracking.dart';
 import '../repositories/project_repository.dart';
 import '../services/notification_service.dart';
 import '../services/sharing_service.dart';
 import '../supabase_config.dart';
+import '../utils/holidays.dart';
 import '../utils/id_generator.dart';
 
 const neubauStarterGewerke = ['Architekt', 'Erdbau', 'Behörde'];
@@ -127,22 +129,31 @@ class ProjectStore extends ChangeNotifier {
   Future<void> addProject(
     String name, {
     String address = '',
-    required String projectType,
+    String projectType = '',
   }) async {
-    final starterGewerke = switch (projectType) {
-      'sanierung' => sanierungStarterGewerke,
-      'neubau' => neubauStarterGewerke,
-      _ => const <String>[],
-    };
+    // ⛔ Vorgefertigte Start-Gewerke je nach Projekt-Art (Neubau/Sanierung)
+    // deaktiviert – ein neues Projekt bekommt stattdessen nur einen
+    // einzigen Reiter "Allgemein" mit allen Modulen (siehe unten).
+    // final starterGewerke = switch (projectType) {
+    //   'sanierung' => sanierungStarterGewerke,
+    //   'neubau' => neubauStarterGewerke,
+    //   _ => const <String>[],
+    // };
     projects.add(Project(
       newId(),
       name,
       address: address,
       projectType: projectType,
-      // ✅ Standard-Gewerke starten direkt mit einem Kontakt-Modul.
-      gewerke: starterGewerke
-          .map((g) => Gewerk(newId(), g, modules: [ContactModule(newId())]))
-          .toList(),
+      gewerke: [
+        Gewerk(newId(), 'Allgemein', modules: [
+          ContactModule(newId()),
+          TodoModule(newId()),
+          FileModule(newId()),
+        ]),
+      ],
+      // gewerke: starterGewerke
+      //     .map((g) => Gewerk(newId(), g, modules: [ContactModule(newId())]))
+      //     .toList(),
     ));
     notifyListeners();
     await _persist();
@@ -174,6 +185,72 @@ class ProjectStore extends ChangeNotifier {
     final project = _project(projectId);
     project.priorityWarningDays = priorityWarningDays;
     project.notifyOnPriorityWarning = notifyOnPriorityWarning;
+    notifyListeners();
+    await _persist();
+  }
+
+  Future<void> updateSkipPartialStatus(
+    String projectId, {
+    required bool skipPartialStatus,
+  }) async {
+    _project(projectId).skipPartialStatus = skipPartialStatus;
+    notifyListeners();
+    await _persist();
+  }
+
+  Future<void> updateShiftDays(
+    String projectId, {
+    required int shiftDays,
+  }) async {
+    _project(projectId).shiftDays = shiftDays;
+    notifyListeners();
+    await _persist();
+  }
+
+  Future<void> updateArchiveSettings(
+    String projectId, {
+    required int archiveAfterDays,
+    required bool moveCompletedToArchiveToo,
+  }) async {
+    final project = _project(projectId);
+    project.archiveAfterDays = archiveAfterDays;
+    project.moveCompletedToArchiveToo = moveCompletedToArchiveToo;
+    notifyListeners();
+    await _persist();
+  }
+
+  Future<void> updateDeleteArchivedSettings(
+    String projectId, {
+    required bool deleteArchivedTasksPermanently,
+    required int deleteArchivedAfterDays,
+  }) async {
+    final project = _project(projectId);
+    project.deleteArchivedTasksPermanently = deleteArchivedTasksPermanently;
+    project.deleteArchivedAfterDays = deleteArchivedAfterDays;
+    notifyListeners();
+    await _persist();
+  }
+
+  // Entfernt archivierte (nicht erledigte) Aufgaben endgültig, sobald sie
+  // insgesamt archiveAfterDays + deleteArchivedAfterDays Tage alt sind –
+  // nur wenn deleteArchivedTasksPermanently aktiv ist. Wird beim Öffnen
+  // eines Projekts aufgerufen (siehe GewerkeScreen.initState).
+  Future<void> cleanupExpiredArchivedTasks(String projectId) async {
+    final project = _project(projectId);
+    if (!project.deleteArchivedTasksPermanently) return;
+    final threshold =
+        project.archiveAfterDays + project.deleteArchivedAfterDays;
+    var changed = false;
+    for (final gewerk in project.gewerke) {
+      for (final module in gewerk.modules.whereType<TodoModule>()) {
+        final before = module.tasks.length;
+        module.tasks.removeWhere((task) =>
+            task.status == 'archiviert' &&
+            DateTime.now().difference(task.updatedAt).inDays >= threshold);
+        if (module.tasks.length != before) changed = true;
+      }
+    }
+    if (!changed) return;
     notifyListeners();
     await _persist();
   }
@@ -256,11 +333,12 @@ class ProjectStore extends ChangeNotifier {
     String taskId, {
     required String actor,
   }) async {
+    final project = _project(projectId);
     final task = _todoModule(projectId, gewerkId, moduleId)
         .tasks
         .firstWhere((t) => t.id == taskId);
     if (task.status == 'offen') {
-      task.status = 'teilweise';
+      task.status = project.skipPartialStatus ? 'erledigt' : 'teilweise';
     } else if (task.status == 'teilweise') {
       task.status = 'erledigt';
     } else if (task.status == 'erledigt') {
@@ -298,6 +376,36 @@ class ProjectStore extends ChangeNotifier {
     await _persist();
   }
 
+  // Verschiebt um die in den Projekt-Optionen eingestellte Anzahl Tage
+  // (Standard 3) und rückt danach auf den nächsten Werktag weiter, falls
+  // das Ergebnis auf einen Sonntag oder Feiertag fällt.
+  Future<void> shiftTaskDueDateByDefault(
+    String projectId,
+    String gewerkId,
+    String moduleId,
+    String taskId, {
+    required String holidayCountry,
+    required String actor,
+  }) async {
+    final project = _project(projectId);
+    final task = _todoModule(projectId, gewerkId, moduleId)
+        .tasks
+        .firstWhere((t) => t.id == taskId);
+    if (task.dueDate == null) {
+      return;
+    }
+    final shifted =
+        task.dueDate!.add(Duration(days: project.shiftDays));
+    task.dueDate = nextWorkday(shifted, holidayCountry);
+    task.updatedAt = DateTime.now();
+    task.history.add(AuditEntry(
+      kurzzeichen: actor,
+      action: 'Fälligkeit um ${project.shiftDays} Tage verschoben',
+    ));
+    notifyListeners();
+    await _persist();
+  }
+
   Future<void> archiveTask(
     String projectId,
     String gewerkId,
@@ -315,18 +423,51 @@ class ProjectStore extends ChangeNotifier {
     await _persist();
   }
 
-  Future<void> updateContactModule(
+  Future<void> addContactPerson(
     String projectId,
     String gewerkId,
     String moduleId, {
+    required String name,
+    String phone = '',
+    required String actor,
+  }) async {
+    final module = _module(projectId, gewerkId, moduleId) as ContactModule;
+    module.contacts.add(ContactPerson(id: newId(), name: name, phone: phone));
+    module.history
+        .add(AuditEntry(kurzzeichen: actor, action: 'Person hinzugefügt'));
+    notifyListeners();
+    await _persist();
+  }
+
+  Future<void> updateContactPerson(
+    String projectId,
+    String gewerkId,
+    String moduleId,
+    String personId, {
     required String name,
     required String phone,
     required String actor,
   }) async {
     final module = _module(projectId, gewerkId, moduleId) as ContactModule;
-    module.name = name;
-    module.phone = phone;
+    final person = module.contacts.firstWhere((c) => c.id == personId);
+    person.name = name;
+    person.phone = phone;
     module.history.add(AuditEntry(kurzzeichen: actor, action: 'bearbeitet'));
+    notifyListeners();
+    await _persist();
+  }
+
+  Future<void> removeContactPerson(
+    String projectId,
+    String gewerkId,
+    String moduleId,
+    String personId, {
+    required String actor,
+  }) async {
+    final module = _module(projectId, gewerkId, moduleId) as ContactModule;
+    module.contacts.removeWhere((c) => c.id == personId);
+    module.history
+        .add(AuditEntry(kurzzeichen: actor, action: 'Person entfernt'));
     notifyListeners();
     await _persist();
   }
@@ -474,9 +615,51 @@ class ProjectStore extends ChangeNotifier {
       ));
       demand.history
           .add(AuditEntry(kurzzeichen: actor, action: 'Helfer eingetragen: $name'));
+      _syncHelperIntoTimeTracking(project, day, name, actor);
     }
     notifyListeners();
     await _persist();
+  }
+
+  // Ist an [day] laut aktivem Arbeitszeitprofil ein Arbeitstag, wird der
+  // Helfer automatisch (mit den daraus berechneten Stunden) in die
+  // Zeitstatistik übernommen – Helfer eintragen im Überblick ist die
+  // einzige Erfassungsstelle, die Zeitstatistik zeigt nur die Auswertung.
+  void _syncHelperIntoTimeTracking(
+    Project project,
+    DateTime day,
+    String helperName,
+    String actor,
+  ) {
+    final schedule = project.activeWorkTimeProfile?.scheduleFor(day.weekday);
+    if (schedule == null) return;
+    final existing =
+        project.workDayEntries.where((e) => e.date.isAtSameMomentAs(day));
+    if (existing.isNotEmpty) {
+      final entry = existing.first;
+      entry.hours = schedule.hours;
+      if (!entry.helperNames.contains(helperName)) {
+        entry.helperNames.add(helperName);
+      }
+      entry.history.add(AuditEntry(
+        kurzzeichen: actor,
+        action: 'Aus Helferbedarf übernommen: $helperName',
+      ));
+    } else {
+      project.workDayEntries.add(WorkDayEntry(
+        id: newId(),
+        date: day,
+        hours: schedule.hours,
+        helperNames: [helperName],
+        history: [
+          AuditEntry(
+            kurzzeichen: actor,
+            action:
+                'Automatisch aus aktivem Profil erstellt (Helferbedarf: $helperName)',
+          ),
+        ],
+      ));
+    }
   }
 
   Future<void> removeHelperSignup(
@@ -484,10 +667,191 @@ class ProjectStore extends ChangeNotifier {
     String demandId,
     String signupId,
   ) async {
-    final demand =
-        _project(projectId).helperDemands.firstWhere((d) => d.id == demandId);
+    final project = _project(projectId);
+    final demand = project.helperDemands.firstWhere((d) => d.id == demandId);
+    final removedSignups =
+        demand.signups.where((s) => s.id == signupId).toList();
     demand.signups.removeWhere((s) => s.id == signupId);
+    for (final signup in removedSignups) {
+      final day = _dateOnly(demand.date);
+      final entries =
+          project.workDayEntries.where((e) => e.date.isAtSameMomentAs(day));
+      if (entries.isNotEmpty) {
+        entries.first.helperNames.remove(signup.name);
+      }
+    }
     notifyListeners();
     await _persist();
   }
+
+  Future<void> updateTimeTrackingEnabled(
+    String projectId, {
+    required bool enabled,
+  }) async {
+    _project(projectId).timeTrackingEnabled = enabled;
+    notifyListeners();
+    await _persist();
+  }
+
+  // Schalter "Ich bin auf der Baustelle" (V1): bleibt aktiv, bis er wieder
+  // ausgeschaltet wird, statt täglich neu gesetzt werden zu müssen.
+  Future<void> setOnSitePresence(
+    String projectId, {
+    required String person,
+    required bool present,
+  }) async {
+    final project = _project(projectId);
+    if (present) {
+      if (!project.onSitePresence.contains(person)) {
+        project.onSitePresence.add(person);
+      }
+    } else {
+      project.onSitePresence.remove(person);
+    }
+    notifyListeners();
+    await _persist();
+    // Sofort für heute nachziehen, statt erst beim nächsten App-Start.
+    await syncOnSitePresenceForToday(projectId, actor: person);
+  }
+
+  // Solange mindestens ein Nutzer als anwesend markiert ist, wird jeder Tag,
+  // der laut aktivem Profil ein Arbeitstag ist, automatisch in die
+  // Zeitstatistik übernommen – ohne dass dafür ein Helfer eingetragen
+  // werden muss. Wird beim Öffnen des Projekts aufgerufen (für "heute").
+  Future<void> syncOnSitePresenceForToday(
+    String projectId, {
+    required String actor,
+  }) async {
+    final project = _project(projectId);
+    if (project.onSitePresence.isEmpty) return;
+    final today = _dateOnly(DateTime.now());
+    final schedule = project.activeWorkTimeProfile?.scheduleFor(today.weekday);
+    if (schedule == null) return;
+
+    final existing =
+        project.workDayEntries.where((e) => e.date.isAtSameMomentAs(today));
+    final WorkDayEntry entry;
+    var changed = false;
+    if (existing.isNotEmpty) {
+      entry = existing.first;
+      if (entry.hours != schedule.hours) {
+        entry.hours = schedule.hours;
+        changed = true;
+      }
+    } else {
+      entry = WorkDayEntry(id: newId(), date: today, hours: schedule.hours);
+      project.workDayEntries.add(entry);
+      changed = true;
+    }
+    for (final person in project.onSitePresence) {
+      if (!entry.helperNames.contains(person)) {
+        entry.helperNames.add(person);
+        changed = true;
+      }
+    }
+    if (!changed) return;
+    entry.history
+        .add(AuditEntry(kurzzeichen: actor, action: 'Anwesenheit synchronisiert'));
+    notifyListeners();
+    await _persist();
+  }
+
+  Future<void> updateExtendedTimeCalendar(
+    String projectId, {
+    required bool enabled,
+  }) async {
+    _project(projectId).extendedTimeCalendar = enabled;
+    notifyListeners();
+    await _persist();
+  }
+
+  Future<void> addWorkTimeProfile(
+    String projectId,
+    WorkTimeProfile profile,
+  ) async {
+    _project(projectId).workTimeProfiles.add(profile);
+    notifyListeners();
+    await _persist();
+  }
+
+  // Ersetzt ein bestehendes Profil (gleiche id) durch [profile].
+  Future<void> updateWorkTimeProfile(
+    String projectId,
+    WorkTimeProfile profile,
+  ) async {
+    final profiles = _project(projectId).workTimeProfiles;
+    final index = profiles.indexWhere((p) => p.id == profile.id);
+    if (index == -1) return;
+    profiles[index] = profile;
+    notifyListeners();
+    await _persist();
+  }
+
+  Future<void> removeWorkTimeProfile(
+    String projectId,
+    String profileId,
+  ) async {
+    final project = _project(projectId);
+    project.workTimeProfiles.removeWhere((p) => p.id == profileId);
+    if (project.activeWorkTimeProfileId == profileId) {
+      project.activeWorkTimeProfileId = null;
+    }
+    notifyListeners();
+    await _persist();
+  }
+
+  // Genau ein Profil kann gleichzeitig aktiv sein (Radiobox in den
+  // Profilen). profileId: null deaktiviert das aktuell aktive Profil.
+  Future<void> setActiveWorkTimeProfile(
+    String projectId, {
+    required String? profileId,
+  }) async {
+    _project(projectId).activeWorkTimeProfileId = profileId;
+    notifyListeners();
+    await _persist();
+  }
+
+  // Wendet ein Arbeitszeitprofil auf jeden Tag im Zeitraum [from, to] an:
+  // Wochentage ohne Zeitplan im Profil werden übersprungen (arbeitsfrei).
+  // Bereits erfasste Tage werden mit den neuen Stunden überschrieben, ihre
+  // Helferliste bleibt erhalten.
+  Future<void> applyWorkTimeProfile(
+    String projectId, {
+    required WorkTimeProfile profile,
+    required DateTime from,
+    required DateTime to,
+    required String actor,
+  }) async {
+    final project = _project(projectId);
+    final start = _dateOnly(from);
+    final end = _dateOnly(to);
+    for (var day = start;
+        !day.isAfter(end);
+        day = day.add(const Duration(days: 1))) {
+      final schedule = profile.scheduleFor(day.weekday);
+      if (schedule == null) continue;
+      final entry = AuditEntry(
+        kurzzeichen: actor,
+        action: 'Profil "${profile.name}" angewendet',
+      );
+      final existing =
+          project.workDayEntries.where((e) => e.date.isAtSameMomentAs(day));
+      if (existing.isNotEmpty) {
+        existing.first.hours = schedule.hours;
+        existing.first.history.add(entry);
+      } else {
+        project.workDayEntries.add(WorkDayEntry(
+          id: newId(),
+          date: day,
+          hours: schedule.hours,
+          history: [entry],
+        ));
+      }
+    }
+    notifyListeners();
+    await _persist();
+  }
+
+  // Legt einen Arbeitstag manuell an oder überschreibt einen bestehenden
+  // (z.B. um einen aus einem Profil erzeugten Tag im Kalender nachzujustieren).
 }

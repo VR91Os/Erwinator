@@ -8,7 +8,9 @@ import '../models/project.dart';
 import '../models/task.dart';
 import '../state/project_store.dart';
 import '../state/settings_store.dart';
+import '../utils/name_capitalization.dart';
 import '../utils/task_urgency.dart';
+import '../utils/time_picker_24h.dart';
 import 'audit_info_icon.dart';
 import 'task_widget.dart';
 
@@ -139,7 +141,8 @@ class _OverviewTabState extends State<OverviewTab> {
 
   Widget _taskWidgetFor(_TaskRef ref) {
     final store = context.read<ProjectStore>();
-    final actor = context.read<SettingsStore>().currentUserKurzzeichen;
+    final settingsStore = context.read<SettingsStore>();
+    final actor = settingsStore.currentUserKurzzeichen;
     return taskWidget(
       ref.task,
       context,
@@ -149,6 +152,11 @@ class _OverviewTabState extends State<OverviewTab> {
       onShiftDate: () => store.shiftTaskDueDate(
           widget.project.id, ref.gewerkId, ref.moduleId, ref.task.id,
           actor: actor),
+      onShiftDateByDefault: () => store.shiftTaskDueDateByDefault(
+          widget.project.id, ref.gewerkId, ref.moduleId, ref.task.id,
+          holidayCountry: settingsStore.settings.holidayCountry,
+          actor: actor),
+      shiftDays: widget.project.shiftDays,
       onArchive: () => store.archiveTask(
           widget.project.id, ref.gewerkId, ref.moduleId, ref.task.id,
           actor: actor),
@@ -206,6 +214,10 @@ class _OverviewTabState extends State<OverviewTab> {
             label: const Text("Heute"),
           ),
         ),
+        if (widget.project.timeTrackingEnabled) ...[
+          const SizedBox(height: 10),
+          _OnSitePresenceRow(project: widget.project),
+        ],
         const SizedBox(height: 10),
         Text(
           "🙋 Helferbedarf am ${selectedDay.day}.${selectedDay.month}.${selectedDay.year}",
@@ -435,7 +447,12 @@ class _OverviewTabState extends State<OverviewTab> {
                   children: [
                     TextField(
                       controller: nameController,
-                      decoration: const InputDecoration(labelText: "Name *"),
+                      textCapitalization: TextCapitalization.words,
+                      inputFormatters: const [NameCapitalizationFormatter()],
+                      decoration: const InputDecoration(
+                        labelText: "Name *",
+                        helperText: "Mehrere Personen mit Komma trennen",
+                      ),
                     ),
                     const SizedBox(height: 10),
                     Text(
@@ -503,7 +520,7 @@ class _OverviewTabState extends State<OverviewTab> {
                         Expanded(
                           child: OutlinedButton(
                             onPressed: () async {
-                              final picked = await showTimePicker(
+                              final picked = await show24hTimePicker(
                                 context: context,
                                 initialTime: startTime ??
                                     const TimeOfDay(hour: 8, minute: 0),
@@ -521,7 +538,7 @@ class _OverviewTabState extends State<OverviewTab> {
                         Expanded(
                           child: OutlinedButton(
                             onPressed: () async {
-                              final picked = await showTimePicker(
+                              final picked = await show24hTimePicker(
                                 context: context,
                                 initialTime: endTime ??
                                     const TimeOfDay(hour: 12, minute: 0),
@@ -537,6 +554,18 @@ class _OverviewTabState extends State<OverviewTab> {
                         ),
                       ],
                     ),
+                    if (widget.project.activeWorkTimeProfile != null)
+                      Padding(
+                        padding: const EdgeInsets.only(top: 10),
+                        child: Text(
+                          "Ist ein Tag im Zeitraum laut aktivem Profil "
+                          "\"${widget.project.activeWorkTimeProfile!.name}\" "
+                          "ein Arbeitstag, zählt die Zusage automatisch mit "
+                          "in die Zeitstatistik.",
+                          style: TextStyle(
+                              color: Colors.teal.shade700, fontSize: 12),
+                        ),
+                      ),
                   ],
                 ),
               ),
@@ -547,17 +576,21 @@ class _OverviewTabState extends State<OverviewTab> {
                 ),
                 ElevatedButton(
                   onPressed: () {
-                    if (nameController.text.trim().isEmpty) return;
-                    store.addHelperSignupForRange(
-                      widget.project.id,
-                      from: from,
-                      to: to,
-                      name: nameController.text.trim(),
-                      startTime:
-                          startTime == null ? null : formatTime(startTime!),
-                      endTime: endTime == null ? null : formatTime(endTime!),
-                      actor: actor,
-                    );
+                    final names = splitNames(nameController.text);
+                    if (names.isEmpty) return;
+                    for (final name in names) {
+                      store.addHelperSignupForRange(
+                        widget.project.id,
+                        from: from,
+                        to: to,
+                        name: name,
+                        startTime:
+                            startTime == null ? null : formatTime(startTime!),
+                        endTime:
+                            endTime == null ? null : formatTime(endTime!),
+                        actor: actor,
+                      );
+                    }
                     Navigator.pop(dialogContext);
                   },
                   child: const Text("Speichern"),
@@ -567,6 +600,51 @@ class _OverviewTabState extends State<OverviewTab> {
           },
         );
       },
+    );
+  }
+}
+
+// "Ich bin auf der Baustelle" (V1): dauerhafter Schalter statt täglicher
+// Checkbox – siehe ProjectStore.setOnSitePresence/syncOnSitePresenceForToday.
+// Der Hinweistext bleibt bewusst klein und dezent, damit er nicht wie eine
+// aufdringliche Warnung wirkt.
+class _OnSitePresenceRow extends StatelessWidget {
+  final Project project;
+
+  const _OnSitePresenceRow({required this.project});
+
+  @override
+  Widget build(BuildContext context) {
+    final store = context.read<ProjectStore>();
+    final myName = context.watch<SettingsStore>().currentUserDisplayName;
+    final isPresent = project.onSitePresence.contains(myName);
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Row(
+          children: [
+            Switch(
+              value: isPresent,
+              onChanged: (value) => store.setOnSitePresence(
+                project.id,
+                person: myName,
+                present: value,
+              ),
+            ),
+            const Text("Ich bin auf der Baustelle"),
+          ],
+        ),
+        if (isPresent)
+          Padding(
+            padding: const EdgeInsets.only(left: 4, bottom: 4),
+            child: Text(
+              "Arbeitstage laut aktivem Profil zählen automatisch in die "
+              "Zeitstatistik, bis du das wieder ausschaltest.",
+              style: TextStyle(color: Colors.grey.shade600, fontSize: 11),
+            ),
+          ),
+      ],
     );
   }
 }

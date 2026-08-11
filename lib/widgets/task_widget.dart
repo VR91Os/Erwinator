@@ -10,6 +10,8 @@ Widget taskWidget(
   BuildContext context, {
   required VoidCallback onStatusTap,
   required VoidCallback onShiftDate,
+  required VoidCallback onShiftDateByDefault,
+  required int shiftDays,
   required VoidCallback onArchive,
 }) {
   final color = taskUrgencyColor(task);
@@ -131,6 +133,13 @@ Widget taskWidget(
                 icon: const Icon(Icons.schedule),
                 tooltip: "Fälligkeit um 1 Tag verschieben",
                 onPressed: onShiftDate,
+              ),
+              IconButton(
+                icon: const Icon(Icons.fast_forward),
+                tooltip:
+                    "Fälligkeit um $shiftDays Tage verschieben "
+                    "(landet nie auf Sonntag/Feiertag)",
+                onPressed: onShiftDateByDefault,
               ),
               IconButton(
                 icon: const Icon(Icons.archive),

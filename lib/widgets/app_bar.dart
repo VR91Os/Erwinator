@@ -13,6 +13,10 @@ PreferredSizeWidget buildAppBar(
   VoidCallback? onCreate,
   String? createTooltip,
   VoidCallback? onSettings,
+  // ✅ Kleiner Punkt auf dem Zahnrad, solange der Nutzer eine neue
+  // Funktion (z.B. Zeitstatistik) noch nicht entdeckt hat, indem er die
+  // Optionen dort einmal geöffnet hat.
+  bool showSettingsBadge = false,
 }) {
   final leadingIcons = <Widget>[
     if (showBack)
@@ -38,7 +42,9 @@ PreferredSizeWidget buildAppBar(
         : Row(mainAxisSize: MainAxisSize.min, children: leadingIcons),
     actions: [
       IconButton(
-        icon: const Icon(Icons.settings),
+        icon: showSettingsBadge
+            ? const Badge(smallSize: 8, child: Icon(Icons.settings))
+            : const Icon(Icons.settings),
         onPressed: onSettings ??
             () {
               Navigator.push(

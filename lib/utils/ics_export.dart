@@ -6,7 +6,7 @@ String buildIcs(List<Task> tasks, {required String calendarName}) {
   final buffer = StringBuffer();
   buffer.writeln('BEGIN:VCALENDAR');
   buffer.writeln('VERSION:2.0');
-  buffer.writeln('PRODID:-//Baustellen Helfer//DE');
+  buffer.writeln('PRODID:-//Erwinator//DE');
   buffer.writeln('X-WR-CALNAME:${_escape(calendarName)}');
 
   for (final task in tasks) {

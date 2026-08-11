@@ -82,7 +82,7 @@ class _StartScreenState extends State<StartScreen> {
 
     return Scaffold(
       appBar: buildAppBar(
-        "Baustellen Helfer",
+        "Erwinator",
         context,
         false,
         onCreate: () => showNewProjectDialog(context),

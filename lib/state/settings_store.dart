@@ -20,6 +20,13 @@ class SettingsStore extends ChangeNotifier {
   String get currentUserKurzzeichen =>
       settings.userInitials.isEmpty ? '??' : settings.userInitials;
 
+  // Anzeigename für Listen (z.B. "Ich bin auf der Baustelle"), fällt auf
+  // das Kurzzeichen zurück, solange kein Profilname hinterlegt ist.
+  String get currentUserDisplayName =>
+      settings.userName.trim().isEmpty
+          ? currentUserKurzzeichen
+          : settings.userName.trim();
+
   Future<void> init() async {
     // Auf Plattformen ohne Dateisystem-Zugriff (z.B. Web) bleibt die App
     // ohne Persistenz nutzbar, statt beim Start abzustürzen.
@@ -95,6 +102,22 @@ class SettingsStore extends ChangeNotifier {
 
   Future<void> removeInvitedUser(String id) async {
     settings.invitedUsers.removeWhere((u) => u.id == id);
+    notifyListeners();
+    await _persist();
+  }
+
+  bool hasSeenFeatureHint(String key) =>
+      settings.seenFeatureHints.contains(key);
+
+  Future<void> markFeatureHintSeen(String key) async {
+    if (settings.seenFeatureHints.contains(key)) return;
+    settings.seenFeatureHints.add(key);
+    notifyListeners();
+    await _persist();
+  }
+
+  Future<void> setHolidayCountry(String countryCode) async {
+    settings.holidayCountry = countryCode;
     notifyListeners();
     await _persist();
   }

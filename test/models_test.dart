@@ -13,6 +13,7 @@ import 'package:baustelli/models/project.dart';
 import 'package:baustelli/models/project_member.dart';
 import 'package:baustelli/models/task.dart';
 import 'package:baustelli/models/team_member.dart';
+import 'package:baustelli/models/time_tracking.dart';
 import 'package:baustelli/utils/kurzzeichen.dart';
 
 void main() {
@@ -57,6 +58,17 @@ void main() {
       expect(restored.toMap(), settings.toMap());
     });
 
+    test('AppSettings mit Feature-Hints und Feiertagsland', () {
+      final settings = AppSettings(
+        seenFeatureHints: const ['time_tracking'],
+        holidayCountry: 'DE',
+      );
+      final restored = AppSettings.fromMap(settings.toMap());
+      expect(restored.toMap(), settings.toMap());
+      expect(restored.seenFeatureHints, ['time_tracking']);
+      expect(restored.holidayCountry, 'DE');
+    });
+
     test('Task ohne Fälligkeitsdatum', () {
       final task = Task('t1', 'Kabel verlegen', createdBy: 'User');
       final restored = Task.fromMap(task.toMap());
@@ -87,12 +99,14 @@ void main() {
       expect(restored.toMap(), task.toMap());
     });
 
-    test('ContactModule mit Verlauf', () {
+    test('ContactModule mit mehreren Personen und Verlauf', () {
       final module = ContactModule(
         'm1',
-        label: 'Elektriker Müller',
-        name: 'Max Elektriker',
-        phone: '0123456789',
+        label: 'Maurer',
+        contacts: [
+          ContactPerson(id: 'p1', name: 'Max Maurer', phone: '0123456789'),
+          ContactPerson(id: 'p2', name: 'Anna Maurer', phone: '0129999999'),
+        ],
         history: [
           AuditEntry(
               kurzzeichen: 'MAMU',
@@ -102,6 +116,21 @@ void main() {
       );
       final restored = ContactModule.fromMap(module.toMap());
       expect(restored.toMap(), module.toMap());
+    });
+
+    test('ContactModule liest Altformat (einzelner Kontakt) ein', () {
+      final legacy = {
+        'type': ContactModule.moduleType,
+        'id': 'm1',
+        'label': 'Elektriker Müller',
+        'name': 'Max Elektriker',
+        'phone': '0123456789',
+        'history': <Map<String, dynamic>>[],
+      };
+      final restored = ContactModule.fromMap(legacy);
+      expect(restored.contacts, hasLength(1));
+      expect(restored.contacts.single.name, 'Max Elektriker');
+      expect(restored.contacts.single.phone, '0123456789');
     });
 
     test('TodoModule mit mehreren Tasks', () {
@@ -237,7 +266,9 @@ void main() {
 
     test('Gewerk mit gemischten Modultypen', () {
       final gewerk = Gewerk('g1', 'Elektrik', modules: [
-        ContactModule('m1', name: 'Elektriker Müller', phone: '0111'),
+        ContactModule('m1', contacts: [
+          ContactPerson(id: 'p1', name: 'Elektriker Müller', phone: '0111'),
+        ]),
         TodoModule('m2', tasks: [
           Task('t1', 'Sicherungskasten', createdBy: 'User'),
         ]),
@@ -285,6 +316,102 @@ void main() {
       final restored = Project.fromMap(project.toMap());
       expect(restored.toMap(), project.toMap());
       expect(restored.sharedId, 'cloud-uuid-123');
+    });
+
+    test('WeekdaySchedule berechnet Stunden abzüglich Pause', () {
+      final schedule = WeekdaySchedule(
+        weekday: DateTime.monday,
+        startTime: '07:00',
+        endTime: '17:00',
+        breakMinutes: 60,
+      );
+      expect(schedule.hours, 9);
+      final restored = WeekdaySchedule.fromMap(schedule.toMap());
+      expect(restored.toMap(), schedule.toMap());
+    });
+
+    test('WorkTimeProfile "Lange Woche" mit Mo-Fr und Sa', () {
+      final profile = WorkTimeProfile(
+        id: 'profile1',
+        name: 'Lange Woche',
+        schedules: [
+          for (var day = DateTime.monday; day <= DateTime.friday; day++)
+            WeekdaySchedule(
+              weekday: day,
+              startTime: '07:00',
+              endTime: '17:00',
+              breakMinutes: 60,
+            ),
+          WeekdaySchedule(
+            weekday: DateTime.saturday,
+            startTime: '07:00',
+            endTime: '13:00',
+          ),
+        ],
+      );
+      final restored = WorkTimeProfile.fromMap(profile.toMap());
+      expect(restored.toMap(), profile.toMap());
+      expect(restored.scheduleFor(DateTime.wednesday)!.hours, 9);
+      expect(restored.scheduleFor(DateTime.saturday)!.hours, 6);
+      expect(restored.scheduleFor(DateTime.sunday), isNull);
+    });
+
+    test('WorkDayEntry mit Helfern und Verlauf', () {
+      final entry = WorkDayEntry(
+        id: 'day1',
+        date: DateTime(2026, 4, 6),
+        hours: 8.5,
+        helperNames: const ['Anna Huber', 'Max Mustermann'],
+        history: [
+          AuditEntry(
+              kurzzeichen: 'MAMU',
+              action: 'Profil "Lange Woche" angewendet',
+              timestamp: DateTime(2026, 4, 6, 18)),
+        ],
+      );
+      final restored = WorkDayEntry.fromMap(entry.toMap());
+      expect(restored.toMap(), entry.toMap());
+    });
+
+    test('Project mit Zeitstatistik (Profile und erfasste Tage)', () {
+      final project = Project(
+        'p4',
+        'Zeitstatistik-Projekt',
+        timeTrackingEnabled: true,
+        extendedTimeCalendar: true,
+        workTimeProfiles: [
+          WorkTimeProfile(id: 'profile1', name: 'Kurzer Tag', schedules: [
+            WeekdaySchedule(
+                weekday: DateTime.monday,
+                startTime: '07:00',
+                endTime: '13:00'),
+          ]),
+        ],
+        workDayEntries: [
+          WorkDayEntry(
+            id: 'day1',
+            date: DateTime(2026, 4, 6),
+            hours: 6,
+            helperNames: const ['Anna Huber'],
+          ),
+        ],
+        activeWorkTimeProfileId: 'profile1',
+        onSitePresence: const ['Max Mustermann'],
+        shiftDays: 5,
+        archiveAfterDays: 10,
+        moveCompletedToArchiveToo: true,
+        deleteArchivedTasksPermanently: true,
+        deleteArchivedAfterDays: 2,
+      );
+      final restored = Project.fromMap(project.toMap());
+      expect(restored.toMap(), project.toMap());
+      expect(restored.activeWorkTimeProfileId, 'profile1');
+      expect(restored.onSitePresence, ['Max Mustermann']);
+      expect(restored.shiftDays, 5);
+      expect(restored.archiveAfterDays, 10);
+      expect(restored.moveCompletedToArchiveToo, true);
+      expect(restored.deleteArchivedTasksPermanently, true);
+      expect(restored.deleteArchivedAfterDays, 2);
     });
   });
 

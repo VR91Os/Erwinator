@@ -49,7 +49,7 @@ void main() {
     );
     await tester.pumpAndSettle();
 
-    expect(find.text('Baustellen Helfer'), findsOneWidget);
+    expect(find.text('Erwinator'), findsOneWidget);
     expect(find.byTooltip('Neues Projekt'), findsOneWidget);
   });
 }

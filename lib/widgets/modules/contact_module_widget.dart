@@ -6,6 +6,7 @@ import 'package:url_launcher/url_launcher.dart';
 import '../../models/modules/contact_module.dart';
 import '../../state/project_store.dart';
 import '../../state/settings_store.dart';
+import '../../utils/name_capitalization.dart';
 import '../audit_info_icon.dart';
 import 'module_card.dart';
 
@@ -21,6 +22,7 @@ class ContactModuleWidget extends StatelessWidget {
     required this.module,
   });
 
+  // ✅ Regelfall: Person(en) direkt aus den Telefonkontakten übernehmen.
   Future<void> _pickFromContacts(BuildContext context) async {
     final store = context.read<ProjectStore>();
     final actor = context.read<SettingsStore>().currentUserKurzzeichen;
@@ -58,7 +60,7 @@ class ContactModuleWidget extends StatelessWidget {
       );
       if (contact == null || !context.mounted) return;
       final phone = contact.phones.isEmpty ? '' : contact.phones.first.number;
-      store.updateContactModule(
+      store.addContactPerson(
         projectId,
         gewerkId,
         module.id,
@@ -79,6 +81,55 @@ class ContactModuleWidget extends StatelessWidget {
     }
   }
 
+  // Ausnahmefall: Person manuell erfassen, ohne Telefonkontakt.
+  void _addManually(BuildContext context) {
+    final store = context.read<ProjectStore>();
+    final actor = context.read<SettingsStore>().currentUserKurzzeichen;
+    final nameController = TextEditingController();
+
+    showDialog(
+      context: context,
+      builder: (dialogContext) {
+        return AlertDialog(
+          title: const Text("Person manuell hinzufügen"),
+          content: TextField(
+            controller: nameController,
+            textCapitalization: TextCapitalization.words,
+            inputFormatters: const [NameCapitalizationFormatter()],
+            decoration: const InputDecoration(
+              labelText: "Name *",
+              helperText: "Mehrere Personen mit Komma trennen",
+            ),
+            autofocus: true,
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(dialogContext),
+              child: const Text("Abbrechen"),
+            ),
+            ElevatedButton(
+              onPressed: () {
+                final names = splitNames(nameController.text);
+                if (names.isEmpty) return;
+                for (final name in names) {
+                  store.addContactPerson(
+                    projectId,
+                    gewerkId,
+                    module.id,
+                    name: name,
+                    actor: actor,
+                  );
+                }
+                Navigator.pop(dialogContext);
+              },
+              child: const Text("Hinzufügen"),
+            ),
+          ],
+        );
+      },
+    );
+  }
+
   Future<void> _call(BuildContext context, String phone) async {
     final launched = await launchUrl(Uri(scheme: 'tel', path: phone));
     if (!launched && context.mounted) {
@@ -90,8 +141,7 @@ class ContactModuleWidget extends StatelessWidget {
 
   Future<void> _openWhatsApp(BuildContext context, String phone) async {
     final digits = phone.replaceAll(RegExp(r'[^0-9]'), '');
-    final launched =
-        await launchUrl(Uri.parse('https://wa.me/$digits'));
+    final launched = await launchUrl(Uri.parse('https://wa.me/$digits'));
     if (!launched && context.mounted) {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(
@@ -103,7 +153,6 @@ class ContactModuleWidget extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final actor = context.watch<SettingsStore>().currentUserKurzzeichen;
-    final hasPhone = module.phone.trim().isNotEmpty;
 
     return ModuleCard(
       projectId: projectId,
@@ -126,50 +175,132 @@ class ContactModuleWidget extends StatelessWidget {
               AuditInfoIcon(history: module.history),
             ],
           ),
-          TextFormField(
-            initialValue: module.name,
-            decoration: const InputDecoration(labelText: "Name"),
-            onFieldSubmitted: (value) {
-              context.read<ProjectStore>().updateContactModule(
-                    projectId,
-                    gewerkId,
-                    module.id,
-                    name: value,
-                    phone: module.phone,
-                    actor: actor,
-                  );
-            },
+          if (module.contacts.isEmpty)
+            const Padding(
+              padding: EdgeInsets.symmetric(vertical: 6),
+              child: Text(
+                "Noch keine Personen hinterlegt.",
+                style: TextStyle(color: Colors.grey),
+              ),
+            )
+          else
+            ...module.contacts.map(
+              (person) => _ContactPersonTile(
+                projectId: projectId,
+                gewerkId: gewerkId,
+                module: module,
+                person: person,
+                actor: actor,
+                onCall: (phone) => _call(context, phone),
+                onWhatsApp: (phone) => _openWhatsApp(context, phone),
+              ),
+            ),
+          Align(
+            alignment: Alignment.centerLeft,
+            child: TextButton.icon(
+              onPressed: () => _addManually(context),
+              icon: const Icon(Icons.person_add_alt, size: 16),
+              label: const Text("Manuell hinzufügen (ohne Telefonkontakt)"),
+              style: TextButton.styleFrom(
+                foregroundColor: Colors.grey.shade700,
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _ContactPersonTile extends StatelessWidget {
+  final String projectId;
+  final String gewerkId;
+  final ContactModule module;
+  final ContactPerson person;
+  final String actor;
+  final void Function(String phone) onCall;
+  final void Function(String phone) onWhatsApp;
+
+  const _ContactPersonTile({
+    required this.projectId,
+    required this.gewerkId,
+    required this.module,
+    required this.person,
+    required this.actor,
+    required this.onCall,
+    required this.onWhatsApp,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final store = context.read<ProjectStore>();
+    final phoneController = TextEditingController(text: person.phone);
+    final hasPhone = person.phone.trim().isNotEmpty;
+
+    return Container(
+      margin: const EdgeInsets.only(top: 8),
+      padding: const EdgeInsets.all(8),
+      decoration: BoxDecoration(
+        color: Colors.grey.shade100,
+        borderRadius: BorderRadius.circular(8),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              Expanded(
+                child: Text(
+                  person.name.isEmpty ? "(ohne Name)" : person.name,
+                  style: const TextStyle(fontWeight: FontWeight.bold),
+                ),
+              ),
+              IconButton(
+                icon: const Icon(Icons.close, size: 18),
+                tooltip: "Person entfernen",
+                onPressed: () => store.removeContactPerson(
+                  projectId,
+                  gewerkId,
+                  module.id,
+                  person.id,
+                  actor: actor,
+                ),
+              ),
+            ],
           ),
           TextFormField(
-            initialValue: module.phone,
+            controller: phoneController,
             decoration: const InputDecoration(labelText: "Telefonnummer"),
             keyboardType: TextInputType.phone,
-            onFieldSubmitted: (value) {
-              context.read<ProjectStore>().updateContactModule(
-                    projectId,
-                    gewerkId,
-                    module.id,
-                    name: module.name,
-                    phone: value,
-                    actor: actor,
-                  );
-            },
+            onFieldSubmitted: (value) => store.updateContactPerson(
+              projectId,
+              gewerkId,
+              module.id,
+              person.id,
+              name: person.name,
+              phone: value,
+              actor: actor,
+            ),
           ),
           if (hasPhone)
-            Row(
-              children: [
-                OutlinedButton.icon(
-                  onPressed: () => _call(context, module.phone),
-                  icon: const Icon(Icons.call, size: 18),
-                  label: const Text("Anrufen"),
-                ),
-                const SizedBox(width: 8),
-                OutlinedButton.icon(
-                  onPressed: () => _openWhatsApp(context, module.phone),
-                  icon: const Icon(Icons.chat, size: 18, color: Colors.green),
-                  label: const Text("WhatsApp"),
-                ),
-              ],
+            Padding(
+              padding: const EdgeInsets.only(top: 6),
+              child: Row(
+                children: [
+                  OutlinedButton.icon(
+                    onPressed: () => onCall(person.phone),
+                    icon: const Icon(Icons.call, size: 18),
+                    label: const Text("Anrufen"),
+                  ),
+                  const SizedBox(width: 8),
+                  OutlinedButton.icon(
+                    onPressed: () => onWhatsApp(person.phone),
+                    icon:
+                        const Icon(Icons.chat, size: 18, color: Colors.green),
+                    label: const Text("WhatsApp"),
+                  ),
+                ],
+              ),
             ),
         ],
       ),

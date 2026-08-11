@@ -9,6 +9,7 @@ import '../models/task.dart';
 import '../state/project_store.dart';
 import '../utils/file_export.dart';
 import '../utils/ics_export.dart';
+import '../state/settings_store.dart';
 import '../utils/profile_prompt.dart';
 import '../widgets/app_bar.dart';
 import 'share_project_screen.dart';
@@ -16,10 +17,27 @@ import 'share_project_screen.dart';
 // Optionen für den "Überblick"-Reiter: steuert den Export des gesamten
 // Projekts (Daten + optional Kalenderdatei), nicht die App-weiten
 // Einstellungen aus dem Zahnrad im Startbildschirm.
-class OverviewSettingsScreen extends StatelessWidget {
+class OverviewSettingsScreen extends StatefulWidget {
   final String projectId;
 
   const OverviewSettingsScreen({super.key, required this.projectId});
+
+  @override
+  State<OverviewSettingsScreen> createState() =>
+      _OverviewSettingsScreenState();
+}
+
+class _OverviewSettingsScreenState extends State<OverviewSettingsScreen> {
+  @override
+  void initState() {
+    super.initState();
+    // ✅ "Neu"-Badge auf dem Zahnrad verschwindet, sobald die Optionen
+    // einmal geöffnet wurden.
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) return;
+      context.read<SettingsStore>().markFeatureHintSeen('time_tracking');
+    });
+  }
 
   List<Task> _allTasks(Project project) {
     final tasks = <Task>[];
@@ -64,51 +82,39 @@ class OverviewSettingsScreen extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final store = context.watch<ProjectStore>();
-    final project = store.projects.firstWhere((p) => p.id == projectId);
+    final project = store.projects.firstWhere((p) => p.id == widget.projectId);
 
     return Scaffold(
       appBar: buildAppBar("Optionen – Überblick", context, true),
       body: ListView(
         padding: const EdgeInsets.all(16),
         children: [
-          CheckboxListTile(
-            contentPadding: EdgeInsets.zero,
-            title: const Text("Alle ToDos mit Datum in Kalender exportieren"),
-            value: project.exportAllDatedTodos,
-            onChanged: (value) => store.updateExportPrefs(
-              projectId,
-              exportAllDatedTodos: value ?? false,
-              exportPriorityTasks: project.exportPriorityTasks,
-            ),
-          ),
-          CheckboxListTile(
-            contentPadding: EdgeInsets.zero,
-            title: const Text("Prio-Aufgaben exportieren"),
-            value: project.exportPriorityTasks,
-            onChanged: (value) => store.updateExportPrefs(
-              projectId,
-              exportAllDatedTodos: project.exportAllDatedTodos,
-              exportPriorityTasks: value ?? false,
-            ),
-          ),
-          const SizedBox(height: 8),
+          // ✅ Reihenfolge sinngemäß: alltägliche Verhaltens-Einstellungen
+          // zuerst, danach optionale Module/Zusammenarbeit, Exportieren
+          // (seltenste Aktion) ganz unten.
           const Text(
-            "Ist eine der Checkboxen aktiv, wird beim Export zusätzlich eine "
-            ".ics-Kalenderdatei erzeugt – importierbar in Google Kalender, "
-            "Outlook etc.",
+            "Aufgaben-Status",
+            style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
+          ),
+          const SizedBox(height: 4),
+          const Text(
+            "Normalerweise wechselt eine Aufgabe beim Antippen des "
+            "Status-Symbols erst auf \"teilweise erledigt\" und danach auf "
+            "\"erledigt\". Ist diese Option aktiv, springt eine offene "
+            "Aufgabe direkt auf \"erledigt\".",
             style: TextStyle(color: Colors.grey),
           ),
-          const SizedBox(height: 24),
-          const Text(
-            "Alle gesammelten Projektdaten werden als Datei auf der "
-            "Festplatte abgelegt und können auf einem anderen System über "
-            "\"Projekt importieren\" wieder eingelesen werden.",
-          ),
-          const SizedBox(height: 12),
-          ElevatedButton.icon(
-            onPressed: () => _exportProject(context, project),
-            icon: const Icon(Icons.upload_file),
-            label: const Text("Gesamtes Projekt exportieren"),
+          CheckboxListTile(
+            contentPadding: EdgeInsets.zero,
+            title: const Text(
+              "Aufgaben sofort als erledigt markieren "
+              "(Zwischenschritt \"teilweise erledigt\" überspringen)",
+            ),
+            value: project.skipPartialStatus,
+            onChanged: (value) => store.updateSkipPartialStatus(
+              widget.projectId,
+              skipPartialStatus: value ?? false,
+            ),
           ),
           const Divider(height: 40),
           const Text(
@@ -129,7 +135,7 @@ class OverviewSettingsScreen extends StatelessWidget {
                 icon: const Icon(Icons.remove_circle_outline),
                 onPressed: project.priorityWarningDays > 0
                     ? () => store.updatePriorityWarningSettings(
-                          projectId,
+                          widget.projectId,
                           priorityWarningDays: project.priorityWarningDays - 1,
                           notifyOnPriorityWarning:
                               project.notifyOnPriorityWarning,
@@ -145,7 +151,7 @@ class OverviewSettingsScreen extends StatelessWidget {
               IconButton(
                 icon: const Icon(Icons.add_circle_outline),
                 onPressed: () => store.updatePriorityWarningSettings(
-                  projectId,
+                  widget.projectId,
                   priorityWarningDays: project.priorityWarningDays + 1,
                   notifyOnPriorityWarning: project.notifyOnPriorityWarning,
                 ),
@@ -160,9 +166,30 @@ class OverviewSettingsScreen extends StatelessWidget {
             ),
             value: project.notifyOnPriorityWarning,
             onChanged: (value) => store.updatePriorityWarningSettings(
-              projectId,
+              widget.projectId,
               priorityWarningDays: project.priorityWarningDays,
               notifyOnPriorityWarning: value ?? false,
+            ),
+          ),
+          const Divider(height: 40),
+          const Text(
+            "Zeitstatistik",
+            style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
+          ),
+          const SizedBox(height: 4),
+          const Text(
+            "Optionales Modul im Überblick-Reiter, um die gesamte am "
+            "Projekt gearbeitete Zeit über Arbeitszeitprofile und einen "
+            "Kalender zu erfassen.",
+            style: TextStyle(color: Colors.grey),
+          ),
+          CheckboxListTile(
+            contentPadding: EdgeInsets.zero,
+            title: const Text("Zeitstatistik-Modul aktivieren"),
+            value: project.timeTrackingEnabled,
+            onChanged: (value) => store.updateTimeTrackingEnabled(
+              widget.projectId,
+              enabled: value ?? false,
             ),
           ),
           const Divider(height: 40),
@@ -188,7 +215,7 @@ class OverviewSettingsScreen extends StatelessWidget {
                 context,
                 MaterialPageRoute(
                   builder: (context) =>
-                      ShareProjectScreen(projectId: projectId),
+                      ShareProjectScreen(projectId: widget.projectId),
                 ),
               );
             },
@@ -196,6 +223,51 @@ class OverviewSettingsScreen extends StatelessWidget {
             label: Text(
               project.sharedId == null ? "Projekt teilen" : "Teilen verwalten",
             ),
+          ),
+          const Divider(height: 40),
+          const Text(
+            "Exportieren",
+            style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
+          ),
+          const SizedBox(height: 4),
+          CheckboxListTile(
+            contentPadding: EdgeInsets.zero,
+            title: const Text("Alle ToDos mit Datum in Kalender exportieren"),
+            value: project.exportAllDatedTodos,
+            onChanged: (value) => store.updateExportPrefs(
+              widget.projectId,
+              exportAllDatedTodos: value ?? false,
+              exportPriorityTasks: project.exportPriorityTasks,
+            ),
+          ),
+          CheckboxListTile(
+            contentPadding: EdgeInsets.zero,
+            title: const Text("Prio-Aufgaben exportieren"),
+            value: project.exportPriorityTasks,
+            onChanged: (value) => store.updateExportPrefs(
+              widget.projectId,
+              exportAllDatedTodos: project.exportAllDatedTodos,
+              exportPriorityTasks: value ?? false,
+            ),
+          ),
+          const SizedBox(height: 8),
+          const Text(
+            "Ist eine der Checkboxen aktiv, wird beim Export zusätzlich eine "
+            ".ics-Kalenderdatei erzeugt – importierbar in Google Kalender, "
+            "Outlook etc.",
+            style: TextStyle(color: Colors.grey),
+          ),
+          const SizedBox(height: 24),
+          const Text(
+            "Alle gesammelten Projektdaten werden als Datei auf der "
+            "Festplatte abgelegt und können auf einem anderen System über "
+            "\"Projekt importieren\" wieder eingelesen werden.",
+          ),
+          const SizedBox(height: 12),
+          ElevatedButton.icon(
+            onPressed: () => _exportProject(context, project),
+            icon: const Icon(Icons.upload_file),
+            label: const Text("Gesamtes Projekt exportieren"),
           ),
         ],
       ),

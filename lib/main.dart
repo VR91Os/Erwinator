@@ -34,7 +34,7 @@ class BaustellenApp extends StatelessWidget {
         ChangeNotifierProvider(create: (_) => SettingsStore()..init()),
       ],
       child: MaterialApp(
-        title: 'Erwin der Baustellen Helfer',
+        title: 'Erwinator',
         theme: ThemeData(
           primarySwatch: Colors.grey,
         ),

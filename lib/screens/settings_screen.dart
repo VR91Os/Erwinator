@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 
 import '../state/settings_store.dart';
+import '../utils/holidays.dart';
 import '../utils/kurzzeichen.dart';
 import '../widgets/app_bar.dart';
 
@@ -162,6 +163,34 @@ class _SettingsScreenState extends State<SettingsScreen> {
               onPressed: _saveProfile,
               child: const Text("Speichern"),
             ),
+          ),
+          const Divider(height: 32),
+
+          const Text(
+            "Feiertage",
+            style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
+          ),
+          const SizedBox(height: 4),
+          const Text(
+            "Wird beim Verschieben von Aufgaben-Fälligkeiten auf den "
+            "nächsten Werktag berücksichtigt (Sonn- und Feiertage werden "
+            "übersprungen).",
+            style: TextStyle(color: Colors.grey),
+          ),
+          const SizedBox(height: 8),
+          DropdownButtonFormField<String>(
+            initialValue: settings.holidayCountry,
+            decoration: const InputDecoration(labelText: "Land"),
+            items: [
+              const DropdownMenuItem(value: '', child: Text("Keines")),
+              ...holidayCountries.map((code) => DropdownMenuItem(
+                    value: code,
+                    child: Text(holidayCountryLabel(code)),
+                  )),
+            ],
+            onChanged: (value) => context
+                .read<SettingsStore>()
+                .setHolidayCountry(value ?? ''),
           ),
           const Divider(height: 32),
 

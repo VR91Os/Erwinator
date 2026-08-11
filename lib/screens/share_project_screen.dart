@@ -122,7 +122,7 @@ class _ShareProjectScreenState extends State<ShareProjectScreen> {
                     Center(
                       child: ElevatedButton.icon(
                         onPressed: () => Share.share(
-                          'Tritt meinem Baustelli-Projekt bei! Code: $_sharedId',
+                          'Tritt meinem Erwinator-Projekt bei! Code: $_sharedId',
                         ),
                         icon: const Icon(Icons.share),
                         label: const Text("Einladung teilen"),

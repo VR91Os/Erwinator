@@ -14,6 +14,14 @@ class AppSettings {
 
   List<TeamMember> invitedUsers; // nur lokale Liste, noch kein echter Versand
 
+  // Schlüssel neuer Funktionen (z.B. "time_tracking"), die der Nutzer schon
+  // gesehen hat – steuert den "Neu"-Badge auf dem jeweiligen Options-Zahnrad.
+  List<String> seenFeatureHints;
+
+  // Land für die Feiertagsberechnung (z.B. beim Verschieben von Fälligkeiten
+  // auf den nächsten Werktag). '' = keine Feiertage berücksichtigen.
+  String holidayCountry;
+
   AppSettings({
     this.jumpToLastProject = true,
     this.lastProjectId,
@@ -22,7 +30,10 @@ class AppSettings {
     this.googleAccountEmail = '',
     this.showAuthorInfo = true,
     List<TeamMember>? invitedUsers,
-  }) : invitedUsers = invitedUsers ?? [];
+    List<String>? seenFeatureHints,
+    this.holidayCountry = 'AT',
+  })  : invitedUsers = invitedUsers ?? [],
+        seenFeatureHints = seenFeatureHints ?? [];
 
   Map<String, dynamic> toMap() => {
         'jumpToLastProject': jumpToLastProject,
@@ -32,6 +43,8 @@ class AppSettings {
         'googleAccountEmail': googleAccountEmail,
         'showAuthorInfo': showAuthorInfo,
         'invitedUsers': invitedUsers.map((u) => u.toMap()).toList(),
+        'seenFeatureHints': seenFeatureHints,
+        'holidayCountry': holidayCountry,
       };
 
   factory AppSettings.fromMap(Map<String, dynamic> map) => AppSettings(
@@ -44,5 +57,9 @@ class AppSettings {
         invitedUsers: (map['invitedUsers'] as List<dynamic>? ?? [])
             .map((e) => TeamMember.fromMap(e as Map<String, dynamic>))
             .toList(),
+        seenFeatureHints: (map['seenFeatureHints'] as List<dynamic>? ?? [])
+            .map((e) => e as String)
+            .toList(),
+        holidayCountry: map['holidayCountry'] as String? ?? 'AT',
       );
 }
