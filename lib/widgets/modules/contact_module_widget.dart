@@ -25,6 +25,34 @@ class ContactModuleWidget extends StatelessWidget {
     final store = context.read<ProjectStore>();
     final actor = context.read<SettingsStore>().currentUserKurzzeichen;
     try {
+      if (!await FlutterContacts.permissions.has(PermissionType.read)) {
+        final status =
+            await FlutterContacts.permissions.request(PermissionType.read);
+        if (status != PermissionStatus.granted &&
+            status != PermissionStatus.limited) {
+          if (!context.mounted) return;
+          final permanentlyDenied =
+              status == PermissionStatus.permanentlyDenied ||
+                  status == PermissionStatus.restricted;
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+              content: Text(
+                permanentlyDenied
+                    ? "Kontakt-Zugriff wurde verweigert. Bitte in den "
+                        "App-Einstellungen erlauben."
+                    : "Zugriff auf Kontakte wurde nicht erlaubt.",
+              ),
+              action: permanentlyDenied
+                  ? SnackBarAction(
+                      label: "Einstellungen",
+                      onPressed: FlutterContacts.permissions.openSettings,
+                    )
+                  : null,
+            ),
+          );
+          return;
+        }
+      }
       final contact = await FlutterContacts.native.showPicker(
         properties: {ContactProperty.phone},
       );
