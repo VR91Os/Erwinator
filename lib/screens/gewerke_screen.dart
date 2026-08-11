@@ -111,6 +111,7 @@ class _GewerkeScreenState extends State<GewerkeScreen> {
                 _tabChip(
                   label: "Überblick",
                   selected: selectedTabId == _overviewTabId,
+                  accent: true,
                   onTap: () => setState(() => selectedTabId = _overviewTabId),
                 ),
                 ...project.gewerke.map((gewerk) {
@@ -124,6 +125,7 @@ class _GewerkeScreenState extends State<GewerkeScreen> {
                 _tabChip(
                   label: "Dateiablage",
                   selected: isFileArchive,
+                  accent: true,
                   onTap: () =>
                       setState(() => selectedTabId = _fileArchiveTabId),
                 ),
@@ -149,21 +151,36 @@ class _GewerkeScreenState extends State<GewerkeScreen> {
     );
   }
 
+  // ✅ "Überblick" und "Dateiablage" sind feste System-Reiter (im Gegensatz
+  // zu den frei anlegbaren Gewerken) und bekommen dauerhaft einen blauen
+  // Hintergrund, damit sie sich auch unausgewählt von den Gewerken abheben.
   Widget _tabChip({
     required String label,
     required bool selected,
     required VoidCallback onTap,
+    bool accent = false,
   }) {
+    final Color color;
+    final Color textColor;
+    if (accent) {
+      color = selected ? Colors.blue.shade400 : Colors.blue.shade200;
+      textColor = selected ? Colors.white : Colors.blue.shade900;
+    } else {
+      color = selected ? Colors.grey.shade400 : Colors.grey.shade300;
+      textColor = Colors.black;
+    }
     return GestureDetector(
       onTap: onTap,
       child: Container(
         margin: const EdgeInsets.all(8),
         padding: const EdgeInsets.symmetric(horizontal: 15, vertical: 10),
         decoration: BoxDecoration(
-          color: selected ? Colors.grey.shade400 : Colors.grey.shade300,
+          color: color,
           borderRadius: BorderRadius.circular(10),
         ),
-        child: Center(child: Text(label)),
+        child: Center(
+          child: Text(label, style: TextStyle(color: textColor)),
+        ),
       ),
     );
   }
