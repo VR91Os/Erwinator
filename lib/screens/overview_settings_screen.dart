@@ -9,6 +9,7 @@ import '../models/task.dart';
 import '../state/project_store.dart';
 import '../utils/file_export.dart';
 import '../utils/ics_export.dart';
+import '../utils/profile_prompt.dart';
 import '../widgets/app_bar.dart';
 import 'share_project_screen.dart';
 
@@ -125,12 +126,17 @@ class OverviewSettingsScreen extends StatelessWidget {
           ),
           const SizedBox(height: 12),
           ElevatedButton.icon(
-            onPressed: () => Navigator.push(
-              context,
-              MaterialPageRoute(
-                builder: (context) => ShareProjectScreen(projectId: projectId),
-              ),
-            ),
+            onPressed: () async {
+              final proceed = await ensureProfileForSharing(context);
+              if (!proceed || !context.mounted) return;
+              Navigator.push(
+                context,
+                MaterialPageRoute(
+                  builder: (context) =>
+                      ShareProjectScreen(projectId: projectId),
+                ),
+              );
+            },
             icon: const Icon(Icons.group_add),
             label: Text(
               project.sharedId == null ? "Projekt teilen" : "Teilen verwalten",

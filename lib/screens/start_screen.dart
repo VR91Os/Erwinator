@@ -8,6 +8,7 @@ import '../state/project_store.dart';
 import '../state/settings_store.dart';
 import '../utils/file_export.dart';
 import '../utils/id_generator.dart';
+import '../utils/profile_prompt.dart';
 import '../widgets/app_bar.dart';
 import '../widgets/dialogs/new_project_dialog.dart';
 import '../widgets/project_card.dart';
@@ -121,12 +122,16 @@ class _StartScreenState extends State<StartScreen> {
                 ),
                 Center(
                   child: TextButton.icon(
-                    onPressed: () => Navigator.push(
-                      context,
-                      MaterialPageRoute(
-                        builder: (context) => const JoinProjectScreen(),
-                      ),
-                    ),
+                    onPressed: () async {
+                      final proceed = await ensureProfileForSharing(context);
+                      if (!proceed || !context.mounted) return;
+                      Navigator.push(
+                        context,
+                        MaterialPageRoute(
+                          builder: (context) => const JoinProjectScreen(),
+                        ),
+                      );
+                    },
                     icon: const Icon(Icons.group_add),
                     label: const Text("Projekt beitreten"),
                   ),
