@@ -14,6 +14,7 @@ import '../widgets/modules/contact_module_widget.dart';
 import '../widgets/modules/file_module_widget.dart';
 import '../widgets/modules/module_picker_dialog.dart';
 import '../widgets/modules/todo_module_widget.dart';
+import '../utils/task_urgency.dart';
 import '../widgets/file_archive_tab.dart';
 import '../widgets/overview_tab.dart';
 import 'gewerk_settings_screen.dart';
@@ -112,12 +113,15 @@ class _GewerkeScreenState extends State<GewerkeScreen> {
                   label: "Überblick",
                   selected: selectedTabId == _overviewTabId,
                   accent: true,
+                  urgent: projectHasUrgentPriorityTask(project),
                   onTap: () => setState(() => selectedTabId = _overviewTabId),
                 ),
                 ...project.gewerke.map((gewerk) {
                   return _tabChip(
                     label: gewerk.name,
                     selected: selectedTabId == gewerk.id,
+                    urgent: gewerkHasUrgentPriorityTask(
+                        gewerk, project.priorityWarningDays),
                     onTap: () => setState(() => selectedTabId = gewerk.id),
                   );
                 }),
@@ -159,10 +163,16 @@ class _GewerkeScreenState extends State<GewerkeScreen> {
     required bool selected,
     required VoidCallback onTap,
     bool accent = false,
+    bool urgent = false,
   }) {
     final Color color;
     final Color textColor;
-    if (accent) {
+    if (urgent) {
+      // ✅ Überschreibt Blau/Grau: offene Prio-Aufgabe hat die projektweit
+      // eingestellte Warnschwelle vor Fälligkeit erreicht.
+      color = selected ? Colors.red.shade400 : Colors.red.shade200;
+      textColor = selected ? Colors.white : Colors.red.shade900;
+    } else if (accent) {
       color = selected ? Colors.blue.shade400 : Colors.blue.shade200;
       textColor = selected ? Colors.white : Colors.blue.shade900;
     } else {

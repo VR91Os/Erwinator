@@ -12,6 +12,7 @@ import '../models/modules/todo_module.dart';
 import '../models/project.dart';
 import '../models/task.dart';
 import '../repositories/project_repository.dart';
+import '../services/notification_service.dart';
 import '../services/sharing_service.dart';
 import '../supabase_config.dart';
 import '../utils/id_generator.dart';
@@ -46,6 +47,7 @@ class ProjectStore extends ChangeNotifier {
     }
     isLoading = false;
     notifyListeners();
+    NotificationService.instance.syncForProjects(projects);
 
     if (_sharingConfigured) {
       for (final project in projects) {
@@ -101,6 +103,7 @@ class ProjectStore extends ChangeNotifier {
     try {
       await _repository.saveProjects(projects);
     } catch (_) {}
+    NotificationService.instance.syncForProjects(projects);
     if (_sharingConfigured) {
       for (final project in projects) {
         if (project.sharedId == null) continue;
@@ -159,6 +162,18 @@ class ProjectStore extends ChangeNotifier {
     final project = _project(projectId);
     project.exportAllDatedTodos = exportAllDatedTodos;
     project.exportPriorityTasks = exportPriorityTasks;
+    notifyListeners();
+    await _persist();
+  }
+
+  Future<void> updatePriorityWarningSettings(
+    String projectId, {
+    required int priorityWarningDays,
+    required bool notifyOnPriorityWarning,
+  }) async {
+    final project = _project(projectId);
+    project.priorityWarningDays = priorityWarningDays;
+    project.notifyOnPriorityWarning = notifyOnPriorityWarning;
     notifyListeners();
     await _persist();
   }

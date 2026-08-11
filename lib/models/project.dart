@@ -20,6 +20,14 @@ class Project {
   bool exportAllDatedTodos;
   bool exportPriorityTasks;
 
+  // Anzahl Tage vor Fälligkeit, ab der ein Gewerk-Reiter (und bei
+  // Betroffenheit auch der Überblick-Reiter) hellrot markiert wird, wenn
+  // eine offene Prio-Aufgabe die Schwelle erreicht.
+  int priorityWarningDays;
+  // Zusätzlich eine Push-Nachricht anzeigen, sobald die Warnschwelle
+  // erreicht wird (auch wenn die App geschlossen ist).
+  bool notifyOnPriorityWarning;
+
   // ID der Zeile in der Supabase-Tabelle "shared_projects", sobald das
   // Projekt geteilt wurde. null = nur lokal, nicht geteilt.
   String? sharedId;
@@ -33,6 +41,8 @@ class Project {
     List<HelperDemand>? helperDemands,
     this.exportAllDatedTodos = false,
     this.exportPriorityTasks = false,
+    this.priorityWarningDays = 7,
+    this.notifyOnPriorityWarning = false,
     this.sharedId,
   })  : gewerke = gewerke ?? [],
         helperDemands = helperDemands ?? [];
@@ -46,6 +56,8 @@ class Project {
         'helperDemands': helperDemands.map((d) => d.toMap()).toList(),
         'exportAllDatedTodos': exportAllDatedTodos,
         'exportPriorityTasks': exportPriorityTasks,
+        'priorityWarningDays': priorityWarningDays,
+        'notifyOnPriorityWarning': notifyOnPriorityWarning,
         'sharedId': sharedId,
       };
 
@@ -62,6 +74,9 @@ class Project {
             .toList(),
         exportAllDatedTodos: map['exportAllDatedTodos'] as bool? ?? false,
         exportPriorityTasks: map['exportPriorityTasks'] as bool? ?? false,
+        priorityWarningDays: map['priorityWarningDays'] as int? ?? 7,
+        notifyOnPriorityWarning:
+            map['notifyOnPriorityWarning'] as bool? ?? false,
         sharedId: map['sharedId'] as String?,
       );
 }

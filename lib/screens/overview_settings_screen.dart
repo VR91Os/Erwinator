@@ -112,6 +112,61 @@ class OverviewSettingsScreen extends StatelessWidget {
           ),
           const Divider(height: 40),
           const Text(
+            "Warnschwelle für Prio-Aufgaben",
+            style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
+          ),
+          const SizedBox(height: 4),
+          const Text(
+            "Ab wie vielen Tagen vor Fälligkeit eine offene Prio-Aufgabe "
+            "den betroffenen Gewerk-Reiter (und den Überblick-Reiter) "
+            "hellrot markiert.",
+            style: TextStyle(color: Colors.grey),
+          ),
+          const SizedBox(height: 8),
+          Row(
+            children: [
+              IconButton(
+                icon: const Icon(Icons.remove_circle_outline),
+                onPressed: project.priorityWarningDays > 0
+                    ? () => store.updatePriorityWarningSettings(
+                          projectId,
+                          priorityWarningDays: project.priorityWarningDays - 1,
+                          notifyOnPriorityWarning:
+                              project.notifyOnPriorityWarning,
+                        )
+                    : null,
+              ),
+              Text(
+                "${project.priorityWarningDays} "
+                "${project.priorityWarningDays == 1 ? 'Tag' : 'Tage'}",
+                style: const TextStyle(
+                    fontSize: 16, fontWeight: FontWeight.bold),
+              ),
+              IconButton(
+                icon: const Icon(Icons.add_circle_outline),
+                onPressed: () => store.updatePriorityWarningSettings(
+                  projectId,
+                  priorityWarningDays: project.priorityWarningDays + 1,
+                  notifyOnPriorityWarning: project.notifyOnPriorityWarning,
+                ),
+              ),
+            ],
+          ),
+          CheckboxListTile(
+            contentPadding: EdgeInsets.zero,
+            title: const Text(
+              "Soll eine Push-Nachricht erscheinen, wenn eine Prio-Aufgabe "
+              "die Warnschwelle erreicht hat?",
+            ),
+            value: project.notifyOnPriorityWarning,
+            onChanged: (value) => store.updatePriorityWarningSettings(
+              projectId,
+              priorityWarningDays: project.priorityWarningDays,
+              notifyOnPriorityWarning: value ?? false,
+            ),
+          ),
+          const Divider(height: 40),
+          const Text(
             "Projekt teilen",
             style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
           ),

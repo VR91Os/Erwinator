@@ -3,15 +3,18 @@ import 'package:provider/provider.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
 import 'screens/start_screen.dart';
+import 'services/notification_service.dart';
 import 'state/project_store.dart';
 import 'state/settings_store.dart';
 import 'supabase_config.dart';
 
 void main() async {
+  WidgetsFlutterBinding.ensureInitialized();
+  await NotificationService.instance.init();
+
   // Projekt-Teilen ist optional: ohne ausgefüllte supabase_config.dart
   // bleibt die App vollständig lokal nutzbar, wie bisher.
   if (supabaseUrl.isNotEmpty && supabaseAnonKey.isNotEmpty) {
-    WidgetsFlutterBinding.ensureInitialized();
     await Supabase.initialize(
       url: supabaseUrl,
       publishableKey: supabaseAnonKey,
