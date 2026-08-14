@@ -5,6 +5,8 @@ import 'dart:typed_data';
 import 'package:file_picker/file_picker.dart';
 import 'package:flutter/foundation.dart' show kIsWeb;
 
+import '../models/modules/file_module.dart';
+
 // Speichert Text als Datei: im Browser als Download, auf Desktop über den
 // System-Speichern-Dialog.
 Future<void> exportTextFile({
@@ -43,24 +45,64 @@ Future<String?> importTextFile({
   return null;
 }
 
-// Name + (nur nativ) lokaler Pfad einer ausgewählten Datei. Im Web ist
-// path immer null, da dort kein Dateisystempfad existiert.
+// Name, (nur nativ) lokaler Pfad und Inhalt einer ausgewählten Datei. Im
+// Web ist path immer null, da dort kein Dateisystempfad existiert.
 class PickedFileInfo {
   final String name;
   final String? path;
-  PickedFileInfo({required this.name, this.path});
+  final Uint8List? bytes;
+  PickedFileInfo({required this.name, this.path, this.bytes});
 }
 
-// Öffnet den System-Dateiauswahl-Dialog für die File-Ablage. Der Inhalt
-// wird von der App selbst bewusst nicht dauerhaft gespeichert – sie
-// trackt in der Regel nur Metadaten (wer/wann/welche Version), kein
-// echtes Datei-Hosting. Ausnahme: Fotos werden nativ lokal kopiert, damit
-// die Foto-Bearbeitung (Kommentare/Messungen) funktioniert – dafür wird
-// hier zusätzlich der Quellpfad zurückgegeben. Gibt null zurück, wenn
-// abgebrochen wurde.
+// Öffnet den System-Dateiauswahl-Dialog für die File-Ablage. Liest den
+// Inhalt direkt mit ein (withData: true), damit die Datei in der
+// Projekt-Ablage gespeichert und später von jedem Projekt-Mitglied wieder
+// abgerufen werden kann – nicht nur Metadaten wie Name/Version. Gibt null
+// zurück, wenn abgebrochen wurde.
 Future<PickedFileInfo?> pickFileInfo() async {
-  final result = await FilePicker.pickFiles();
+  final result = await FilePicker.pickFiles(withData: true);
   if (result == null || result.files.isEmpty) return null;
   final file = result.files.single;
-  return PickedFileInfo(name: file.name, path: file.path);
+  return PickedFileInfo(name: file.name, path: file.path, bytes: file.bytes);
+}
+
+// Speichert Binärdaten als Datei: im Browser als Download, auf
+// Desktop/Mobile über den System-Speichern-Dialog. Für den Rückweg aus der
+// File-Ablage (Datei wieder abrufen).
+Future<void> exportBinaryFile({
+  required String fileName,
+  required Uint8List bytes,
+}) async {
+  if (kIsWeb) {
+    await FilePicker.saveFile(fileName: fileName, bytes: bytes);
+    return;
+  }
+  final path = await FilePicker.saveFile(fileName: fileName);
+  if (path == null) return;
+  await io.File(path).writeAsBytes(bytes);
+}
+
+// Speichert eine einzelne Version einer File-Ablage-Datei wieder auf dem
+// Gerät (Download/Speichern-unter). Jede Version trägt ihren eigenen
+// Inhalt, damit auch ältere Versionen nach einem "Neue Version"-Upload
+// nicht aus dem Ordner fallen, sondern einzeln abrufbar bleiben. Gibt
+// false zurück, wenn für diese Version kein Inhalt hinterlegt ist – z.B.
+// bei Versionen von vor dieser Speicherung –, damit der Aufrufer einen
+// passenden Hinweis anzeigen kann.
+Future<bool> downloadFileVersionContent(
+    FileEntry entry, FileVersion version) async {
+  if (version.content.isEmpty) return false;
+  final bytes = base64Decode(version.content);
+  final fileName = version.extension.isEmpty
+      ? '${entry.name} (${version.label})'
+      : '${entry.name} (${version.label}).${version.extension}';
+  await exportBinaryFile(fileName: fileName, bytes: bytes);
+  return true;
+}
+
+// Kurzform für die neueste Version eines Eintrags.
+Future<bool> downloadFileEntryContent(FileEntry entry) async {
+  final latest = entry.latestVersion;
+  if (latest == null) return false;
+  return downloadFileVersionContent(entry, latest);
 }

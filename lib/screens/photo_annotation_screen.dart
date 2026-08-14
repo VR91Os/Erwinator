@@ -10,10 +10,11 @@ import '../state/settings_store.dart';
 import '../utils/id_generator.dart';
 import '../widgets/app_bar.dart';
 
-// Foto mit Kommentar-Pins und Messungen. Doppeltipp = Kommentar an dieser
-// Stelle, Gedrückt-halten + Ziehen = Messstrecke mit Maßangabe (z.B.
-// "1,3 m"). Beides wird sofort gespeichert – kein eigener Speichern-Knopf
-// nötig. Nur auf nativen Plattformen erreichbar (Bild liegt lokal).
+// Foto mit Kommentar-Pins und Messungen. Gedrückt-halten = Kommentar an
+// dieser Stelle. Doppeltipp = Messpunkt setzen; ein zweiter Doppeltipp
+// schließt die Messstrecke ab und fragt nach der Maßangabe (z.B. "1,3 m").
+// Beides wird sofort gespeichert – kein eigener Speichern-Knopf nötig. Nur
+// auf nativen Plattformen erreichbar (Bild liegt lokal).
 class PhotoAnnotationScreen extends StatefulWidget {
   final String projectId;
   final String gewerkId;
@@ -34,8 +35,9 @@ class PhotoAnnotationScreen extends StatefulWidget {
 
 class _PhotoAnnotationScreenState extends State<PhotoAnnotationScreen> {
   Offset? _pendingDoubleTapPos;
-  Offset? _dragStart;
-  Offset? _dragCurrent;
+  // Startpunkt einer laufenden Messung (erster Doppeltipp). Ein zweiter
+  // Doppeltipp schließt sie ab; Antippen des Markers bricht sie ab.
+  Offset? _measurementStart;
 
   Offset _normalize(Offset local, Size boxSize) => Offset(
         (local.dx / boxSize.width).clamp(0.0, 1.0),
@@ -45,19 +47,13 @@ class _PhotoAnnotationScreenState extends State<PhotoAnnotationScreen> {
   void _handleDoubleTap(Size boxSize) {
     final pos = _pendingDoubleTapPos;
     if (pos == null) return;
-    _showCommentDialog(_normalize(pos, boxSize));
-  }
-
-  void _handleLongPressEnd(Size boxSize) {
-    final start = _dragStart;
-    final end = _dragCurrent;
-    setState(() {
-      _dragStart = null;
-      _dragCurrent = null;
-    });
-    if (start == null || end == null) return;
-    if ((end - start).distance < 8) return; // zu kurz für eine Messung
-    _showMeasurementDialog(_normalize(start, boxSize), _normalize(end, boxSize));
+    final start = _measurementStart;
+    if (start == null) {
+      setState(() => _measurementStart = pos);
+      return;
+    }
+    setState(() => _measurementStart = null);
+    _showMeasurementDialog(_normalize(start, boxSize), _normalize(pos, boxSize));
   }
 
   void _showCommentDialog(Offset norm) {
@@ -259,8 +255,9 @@ class _PhotoAnnotationScreenState extends State<PhotoAnnotationScreen> {
                 const Padding(
                   padding: EdgeInsets.all(8),
                   child: Text(
-                    "Doppeltipp: Kommentar hinzufügen · Gedrückt halten + "
-                    "ziehen: Messung eintragen",
+                    "Gedrückt halten: Kommentar hinzufügen · Doppeltipp: "
+                    "Messung starten, zweiter Doppeltipp: Messung "
+                    "abschließen",
                     style: TextStyle(color: Colors.grey, fontSize: 12),
                     textAlign: TextAlign.center,
                   ),
@@ -285,12 +282,20 @@ class _PhotoAnnotationScreenState extends State<PhotoAnnotationScreen> {
                               ),
                               for (final annotation in entry.annotations)
                                 ..._annotationOverlays(annotation, boxSize),
-                              if (_dragStart != null && _dragCurrent != null)
-                                Positioned.fill(
-                                  child: CustomPaint(
-                                    painter: _MeasurementLinePainter(
-                                      _dragStart!,
-                                      _dragCurrent!,
+                              if (_measurementStart != null)
+                                Positioned(
+                                  left: _measurementStart!.dx - 10,
+                                  top: _measurementStart!.dy - 10,
+                                  child: GestureDetector(
+                                    onTap: () =>
+                                        setState(() => _measurementStart = null),
+                                    child: Container(
+                                      width: 20,
+                                      height: 20,
+                                      decoration: const BoxDecoration(
+                                        color: Colors.amber,
+                                        shape: BoxShape.circle,
+                                      ),
                                     ),
                                   ),
                                 ),
@@ -301,18 +306,10 @@ class _PhotoAnnotationScreenState extends State<PhotoAnnotationScreen> {
                                       _pendingDoubleTapPos =
                                           details.localPosition,
                                   onDoubleTap: () => _handleDoubleTap(boxSize),
-                                  onLongPressStart: (details) {
-                                    setState(() {
-                                      _dragStart = details.localPosition;
-                                      _dragCurrent = details.localPosition;
-                                    });
-                                  },
-                                  onLongPressMoveUpdate: (details) {
-                                    setState(() =>
-                                        _dragCurrent = details.localPosition);
-                                  },
-                                  onLongPressEnd: (_) =>
-                                      _handleLongPressEnd(boxSize),
+                                  onLongPressStart: (details) =>
+                                      _showCommentDialog(
+                                    _normalize(details.localPosition, boxSize),
+                                  ),
                                 ),
                               ),
                             ],

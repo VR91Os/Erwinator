@@ -12,6 +12,7 @@ import '../utils/profile_prompt.dart';
 import '../widgets/app_bar.dart';
 import '../widgets/dialogs/new_project_dialog.dart';
 import '../widgets/project_card.dart';
+import 'documentation_screen.dart';
 import 'gewerke_screen.dart';
 import 'join_project_screen.dart';
 
@@ -118,6 +119,18 @@ class _StartScreenState extends State<StartScreen> {
                     onPressed: () => _importProject(context),
                     icon: const Icon(Icons.file_open),
                     label: const Text("Projekt importieren"),
+                  ),
+                ),
+                Center(
+                  child: TextButton.icon(
+                    onPressed: () => Navigator.push(
+                      context,
+                      MaterialPageRoute(
+                        builder: (context) => const DocumentationScreen(),
+                      ),
+                    ),
+                    icon: const Icon(Icons.folder_special_outlined),
+                    label: const Text("Dokumentation"),
                   ),
                 ),
                 Center(

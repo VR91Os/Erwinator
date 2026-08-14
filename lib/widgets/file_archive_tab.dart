@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import '../models/gewerk.dart';
 import '../models/modules/file_module.dart';
 import '../models/project.dart';
+import '../utils/file_export.dart';
 import 'audit_info_icon.dart';
 
 class _FileRef {
@@ -96,6 +97,21 @@ class _FileArchiveTabState extends State<FileArchiveTab> {
       fromDate = null;
       toDate = null;
     });
+  }
+
+  Future<void> _download(_FileRef ref) async {
+    final ok = await downloadFileEntryContent(ref.entry);
+    if (!mounted) return;
+    if (!ok) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text(
+            "Für diese Datei ist kein Inhalt gespeichert (z.B. vor "
+            "diesem Update hochgeladen).",
+          ),
+        ),
+      );
+    }
   }
 
   @override
@@ -243,7 +259,18 @@ class _FileArchiveTabState extends State<FileArchiveTab> {
                         "${ref.creator.isEmpty ? '' : ' · von ${ref.creator}'}"
                         "${uploadedAt == null ? '' : ' am ${uploadedAt.day}.${uploadedAt.month}.${uploadedAt.year}'}",
                       ),
-                      trailing: AuditInfoIcon(history: ref.entry.history),
+                      trailing: Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          IconButton(
+                            icon: const Icon(Icons.download_outlined,
+                                size: 18),
+                            tooltip: "Datei abrufen",
+                            onPressed: () => _download(ref),
+                          ),
+                          AuditInfoIcon(history: ref.entry.history),
+                        ],
+                      ),
                       onTap: () => widget.onOpenGewerk(ref.gewerk.id),
                     );
                   },

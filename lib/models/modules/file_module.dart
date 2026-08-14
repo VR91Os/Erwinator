@@ -7,7 +7,14 @@ class FileVersion {
   String label;
   DateTime createdAt;
   String createdBy;
+  // Base64-kodierter Dateiinhalt. Wird mit den Projektdaten synchronisiert,
+  // damit die Datei auch von anderen Projekt-Mitgliedern wieder abrufbar
+  // ist. Leer bei Versionen, die vor Einführung dieser Speicherung
+  // angelegt wurden.
   String content;
+  // Ursprüngliche Dateiendung (ohne Punkt, z.B. "pdf", "docx"), damit der
+  // Download denselben Dateityp wiederherstellt.
+  String extension;
 
   FileVersion({
     required this.id,
@@ -15,6 +22,7 @@ class FileVersion {
     DateTime? createdAt,
     this.createdBy = 'User',
     this.content = '',
+    this.extension = '',
   }) : createdAt = createdAt ?? DateTime.now();
 
   Map<String, dynamic> toMap() => {
@@ -23,6 +31,7 @@ class FileVersion {
         'createdAt': createdAt.toIso8601String(),
         'createdBy': createdBy,
         'content': content,
+        'extension': extension,
       };
 
   factory FileVersion.fromMap(Map<String, dynamic> map) => FileVersion(
@@ -31,6 +40,7 @@ class FileVersion {
         createdAt: DateTime.parse(map['createdAt'] as String),
         createdBy: map['createdBy'] as String? ?? 'User',
         content: map['content'] as String? ?? '',
+        extension: map['extension'] as String? ?? '',
       );
 }
 
@@ -49,6 +59,13 @@ class FileEntry {
   // Web gibt es kein Dateisystem dafür, dort bleibt es null.
   String? localImagePath;
   List<ImageAnnotation> annotations;
+
+  // Neueste Version (nach Erstellzeitpunkt), oder null ohne Versionen.
+  FileVersion? get latestVersion {
+    if (versions.isEmpty) return null;
+    return ([...versions]..sort((a, b) => b.createdAt.compareTo(a.createdAt)))
+        .first;
+  }
 
   FileEntry({
     required this.id,

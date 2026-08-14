@@ -4,6 +4,7 @@ import 'package:supabase_flutter/supabase_flutter.dart';
 
 import 'screens/start_screen.dart';
 import 'services/notification_service.dart';
+import 'state/documentation_store.dart';
 import 'state/project_store.dart';
 import 'state/settings_store.dart';
 import 'supabase_config.dart';
@@ -32,6 +33,7 @@ class BaustellenApp extends StatelessWidget {
       providers: [
         ChangeNotifierProvider(create: (_) => ProjectStore()..init()),
         ChangeNotifierProvider(create: (_) => SettingsStore()..init()),
+        ChangeNotifierProvider(create: (_) => DocumentationStore()..init()),
       ],
       child: MaterialApp(
         title: 'Erwinator',
