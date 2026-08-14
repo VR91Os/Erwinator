@@ -8,7 +8,7 @@
 PRODUCT_NAME = Erwinator
 
 // The application's bundle identifier
-PRODUCT_BUNDLE_IDENTIFIER = com.example.baustelli
+PRODUCT_BUNDLE_IDENTIFIER = at.erwinator.app
 
 // The copyright displayed in application information
-PRODUCT_COPYRIGHT = Copyright © 2026 com.example. All rights reserved.
+PRODUCT_COPYRIGHT = Copyright © 2026 at.erwinator. All rights reserved.

@@ -1,4 +1,4 @@
-package com.example.baustelli
+package at.erwinator.app
 
 import io.flutter.embedding.android.FlutterActivity
 
