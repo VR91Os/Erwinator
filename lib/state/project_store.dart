@@ -13,6 +13,7 @@ import '../models/project.dart';
 import '../models/task.dart';
 import '../models/time_tracking.dart';
 import '../repositories/project_repository.dart';
+import '../services/error_log_service.dart';
 import '../services/notification_service.dart';
 import '../services/sharing_service.dart';
 import '../supabase_config.dart';
@@ -52,24 +53,66 @@ class ProjectStore extends ChangeNotifier {
     NotificationService.instance.syncForProjects(projects);
 
     if (_sharingConfigured) {
-      for (final project in projects) {
-        if (project.sharedId != null) _subscribeToProject(project.sharedId!);
+      // Abgleich mit dem aktuellen Cloud-Stand beim Start (nicht nur beim
+      // nächsten lokalen Edit) – deckt den Fall ab, dass sich während der
+      // Offline-Zeit etwas geändert hat, das Realtime allein nicht mehr
+      // nachliefert (Events vor dem Abonnieren gehen sonst verloren).
+      var mergedAnything = false;
+      for (final project in List<Project>.of(projects)) {
+        if (project.sharedId == null) continue;
+        if (await _syncSharedProject(project)) mergedAnything = true;
+        _subscribeToProject(project.sharedId!);
+      }
+      if (mergedAnything) {
+        notifyListeners();
+        try {
+          await _repository.saveProjects(projects);
+        } catch (_) {}
       }
     }
   }
 
   // Hält ein geteiltes Projekt live synchron: Änderungen von anderen
-  // Geräten kommen sofort hier an und aktualisieren die lokale Kopie.
+  // Geräten kommen sofort hier an. Statt die lokale Kopie 1:1 zu ersetzen
+  // (Datenverlust bei gleichzeitiger lokaler Änderung), wird sie mit dem
+  // eingehenden Stand gemergt (Option C, siehe lib/utils/id_merge.dart).
   void _subscribeToProject(String sharedId) {
     if (_projectSubscriptions.containsKey(sharedId)) return;
     _projectSubscriptions[sharedId] =
         _sharingService.subscribeToProjectUpdates(sharedId, (updated) {
       final index = projects.indexWhere((p) => p.sharedId == sharedId);
       if (index == -1) return;
-      projects[index] = updated;
+      projects[index] = projects[index].mergeFrom(updated);
       notifyListeners();
-      _repository.saveProjects(projects).catchError((_) {});
+      _repository.saveProjects(projects).catchError((e, stack) {
+        ErrorLogService.instance
+            .record('Lokales Speichern fehlgeschlagen', '$e\n$stack');
+      });
     });
+  }
+
+  // Holt den aktuellen Cloud-Stand, merged ihn mit der lokalen Version
+  // (statt blind zu überschreiben) und schreibt das Ergebnis zurück – so
+  // in beide Richtungen. Gibt false zurück (und protokolliert den Fehler),
+  // wenn der Abgleich fehlschlägt, z.B. mangels Netzwerk – die lokale
+  // Änderung bleibt dabei immer erhalten, nur der Cloud-Abgleich fällt aus.
+  Future<bool> _syncSharedProject(Project project) async {
+    final sharedId = project.sharedId;
+    if (sharedId == null) return false;
+    try {
+      final remote = await _sharingService.fetchSharedProject(sharedId);
+      final merged = remote == null ? project : project.mergeFrom(remote);
+      final index = projects.indexWhere((p) => p.id == project.id);
+      if (index != -1) projects[index] = merged;
+      await _sharingService.pushUpdate(sharedId, merged);
+      return true;
+    } catch (e, stack) {
+      ErrorLogService.instance.record(
+        'Synchronisierung fehlgeschlagen für "${project.name}"',
+        '$e\n$stack',
+      );
+      return false;
+    }
   }
 
   Future<String> shareProject(String projectId) async {
@@ -104,13 +147,26 @@ class ProjectStore extends ChangeNotifier {
   Future<void> _persist() async {
     try {
       await _repository.saveProjects(projects);
-    } catch (_) {}
+    } catch (e, stack) {
+      ErrorLogService.instance
+          .record('Lokales Speichern fehlgeschlagen', '$e\n$stack');
+    }
     NotificationService.instance.syncForProjects(projects);
-    if (_sharingConfigured) {
-      for (final project in projects) {
-        if (project.sharedId == null) continue;
-        _sharingService.pushUpdate(project.sharedId!, project).catchError((_) {});
-      }
+    if (!_sharingConfigured) return;
+
+    // Vor dem Push erst den aktuellen Cloud-Stand holen und mergen (statt
+    // blind zu überschreiben) – deckt sowohl "Kollege hat parallel etwas
+    // geändert" als auch "war offline, jetzt wieder online" ab.
+    var mergedAnything = false;
+    for (final project in List<Project>.of(projects)) {
+      if (project.sharedId == null) continue;
+      if (await _syncSharedProject(project)) mergedAnything = true;
+    }
+    if (mergedAnything) {
+      notifyListeners();
+      try {
+        await _repository.saveProjects(projects);
+      } catch (_) {}
     }
   }
 
@@ -173,6 +229,7 @@ class ProjectStore extends ChangeNotifier {
     final project = _project(projectId);
     project.exportAllDatedTodos = exportAllDatedTodos;
     project.exportPriorityTasks = exportPriorityTasks;
+    project.updatedAt = DateTime.now();
     notifyListeners();
     await _persist();
   }
@@ -185,6 +242,7 @@ class ProjectStore extends ChangeNotifier {
     final project = _project(projectId);
     project.priorityWarningDays = priorityWarningDays;
     project.notifyOnPriorityWarning = notifyOnPriorityWarning;
+    project.updatedAt = DateTime.now();
     notifyListeners();
     await _persist();
   }
@@ -193,7 +251,9 @@ class ProjectStore extends ChangeNotifier {
     String projectId, {
     required bool skipPartialStatus,
   }) async {
-    _project(projectId).skipPartialStatus = skipPartialStatus;
+    final project = _project(projectId);
+    project.skipPartialStatus = skipPartialStatus;
+    project.updatedAt = DateTime.now();
     notifyListeners();
     await _persist();
   }
@@ -202,7 +262,9 @@ class ProjectStore extends ChangeNotifier {
     String projectId, {
     required int shiftDays,
   }) async {
-    _project(projectId).shiftDays = shiftDays;
+    final project = _project(projectId);
+    project.shiftDays = shiftDays;
+    project.updatedAt = DateTime.now();
     notifyListeners();
     await _persist();
   }
@@ -215,6 +277,7 @@ class ProjectStore extends ChangeNotifier {
     final project = _project(projectId);
     project.archiveAfterDays = archiveAfterDays;
     project.moveCompletedToArchiveToo = moveCompletedToArchiveToo;
+    project.updatedAt = DateTime.now();
     notifyListeners();
     await _persist();
   }
@@ -227,6 +290,7 @@ class ProjectStore extends ChangeNotifier {
     final project = _project(projectId);
     project.deleteArchivedTasksPermanently = deleteArchivedTasksPermanently;
     project.deleteArchivedAfterDays = deleteArchivedAfterDays;
+    project.updatedAt = DateTime.now();
     notifyListeners();
     await _persist();
   }
@@ -243,11 +307,17 @@ class ProjectStore extends ChangeNotifier {
     var changed = false;
     for (final gewerk in project.gewerke) {
       for (final module in gewerk.modules.whereType<TodoModule>()) {
-        final before = module.tasks.length;
-        module.tasks.removeWhere((task) =>
+        final expired = module.tasks.where((task) =>
             task.status == 'archiviert' &&
             DateTime.now().difference(task.updatedAt).inDays >= threshold);
-        if (module.tasks.length != before) changed = true;
+        if (expired.isEmpty) continue;
+        final now = DateTime.now();
+        for (final task in expired) {
+          project.deletedIds[task.id] = now;
+        }
+        module.tasks.removeWhere((task) => task.status == 'archiviert' &&
+            DateTime.now().difference(task.updatedAt).inDays >= threshold);
+        changed = true;
       }
     }
     if (!changed) return;
@@ -266,13 +336,17 @@ class ProjectStore extends ChangeNotifier {
     String gewerkId,
     String name,
   ) async {
-    _gewerk(projectId, gewerkId).name = name;
+    final gewerk = _gewerk(projectId, gewerkId);
+    gewerk.name = name;
+    gewerk.updatedAt = DateTime.now();
     notifyListeners();
     await _persist();
   }
 
   Future<void> removeGewerk(String projectId, String gewerkId) async {
-    _project(projectId).gewerke.removeWhere((g) => g.id == gewerkId);
+    final project = _project(projectId);
+    project.gewerke.removeWhere((g) => g.id == gewerkId);
+    project.deletedIds[gewerkId] = DateTime.now();
     notifyListeners();
     await _persist();
   }
@@ -299,7 +373,9 @@ class ProjectStore extends ChangeNotifier {
     String gewerkId,
     String moduleId,
   ) async {
+    final project = _project(projectId);
     _gewerk(projectId, gewerkId).modules.removeWhere((m) => m.id == moduleId);
+    project.deletedIds[moduleId] = DateTime.now();
     notifyListeners();
     await _persist();
   }
@@ -310,7 +386,9 @@ class ProjectStore extends ChangeNotifier {
     String moduleId,
     String label,
   ) async {
-    _module(projectId, gewerkId, moduleId).label = label;
+    final module = _module(projectId, gewerkId, moduleId);
+    module.label = label;
+    module.updatedAt = DateTime.now();
     notifyListeners();
     await _persist();
   }
@@ -452,6 +530,7 @@ class ProjectStore extends ChangeNotifier {
     final person = module.contacts.firstWhere((c) => c.id == personId);
     person.name = name;
     person.phone = phone;
+    person.updatedAt = DateTime.now();
     module.history.add(AuditEntry(kurzzeichen: actor, action: 'bearbeitet'));
     notifyListeners();
     await _persist();
@@ -464,8 +543,10 @@ class ProjectStore extends ChangeNotifier {
     String personId, {
     required String actor,
   }) async {
+    final project = _project(projectId);
     final module = _module(projectId, gewerkId, moduleId) as ContactModule;
     module.contacts.removeWhere((c) => c.id == personId);
+    project.deletedIds[personId] = DateTime.now();
     module.history
         .add(AuditEntry(kurzzeichen: actor, action: 'Person entfernt'));
     notifyListeners();
@@ -495,6 +576,7 @@ class ProjectStore extends ChangeNotifier {
     final module = _module(projectId, gewerkId, moduleId) as FileModule;
     final entry = module.entries.firstWhere((e) => e.id == entryId);
     entry.versions.add(version);
+    entry.updatedAt = DateTime.now();
     entry.history.add(AuditEntry(
       kurzzeichen: actor,
       action: 'neue Version hochgeladen (${version.label})',
@@ -524,9 +606,11 @@ class ProjectStore extends ChangeNotifier {
     String entryId,
     String annotationId,
   ) async {
+    final project = _project(projectId);
     final module = _module(projectId, gewerkId, moduleId) as FileModule;
     final entry = module.entries.firstWhere((e) => e.id == entryId);
     entry.annotations.removeWhere((a) => a.id == annotationId);
+    project.deletedIds[annotationId] = DateTime.now();
     notifyListeners();
     await _persist();
   }
@@ -559,6 +643,7 @@ class ProjectStore extends ChangeNotifier {
       if (existing.isNotEmpty) {
         existing.first.neededCount = neededCount;
         existing.first.note = note;
+        existing.first.updatedAt = DateTime.now();
         existing.first.history.add(entry);
       } else {
         project.helperDemands.add(HelperDemand(
@@ -575,7 +660,9 @@ class ProjectStore extends ChangeNotifier {
   }
 
   Future<void> removeHelperDemand(String projectId, String demandId) async {
-    _project(projectId).helperDemands.removeWhere((d) => d.id == demandId);
+    final project = _project(projectId);
+    project.helperDemands.removeWhere((d) => d.id == demandId);
+    project.deletedIds[demandId] = DateTime.now();
     notifyListeners();
     await _persist();
   }
@@ -613,6 +700,7 @@ class ProjectStore extends ChangeNotifier {
         startTime: startTime,
         endTime: endTime,
       ));
+      demand.updatedAt = DateTime.now();
       demand.history
           .add(AuditEntry(kurzzeichen: actor, action: 'Helfer eingetragen: $name'));
       _syncHelperIntoTimeTracking(project, day, name, actor);
@@ -638,6 +726,7 @@ class ProjectStore extends ChangeNotifier {
     if (existing.isNotEmpty) {
       final entry = existing.first;
       entry.hours = schedule.hours;
+      entry.updatedAt = DateTime.now();
       if (!entry.helperNames.contains(helperName)) {
         entry.helperNames.add(helperName);
       }
@@ -672,6 +761,7 @@ class ProjectStore extends ChangeNotifier {
     final removedSignups =
         demand.signups.where((s) => s.id == signupId).toList();
     demand.signups.removeWhere((s) => s.id == signupId);
+    project.deletedIds[signupId] = DateTime.now();
     for (final signup in removedSignups) {
       final day = _dateOnly(demand.date);
       final entries =
@@ -688,7 +778,9 @@ class ProjectStore extends ChangeNotifier {
     String projectId, {
     required bool enabled,
   }) async {
-    _project(projectId).timeTrackingEnabled = enabled;
+    final project = _project(projectId);
+    project.timeTrackingEnabled = enabled;
+    project.updatedAt = DateTime.now();
     notifyListeners();
     await _persist();
   }
@@ -708,6 +800,7 @@ class ProjectStore extends ChangeNotifier {
     } else {
       project.onSitePresence.remove(person);
     }
+    project.updatedAt = DateTime.now();
     notifyListeners();
     await _persist();
     // Sofort für heute nachziehen, statt erst beim nächsten App-Start.
@@ -736,6 +829,7 @@ class ProjectStore extends ChangeNotifier {
       entry = existing.first;
       if (entry.hours != schedule.hours) {
         entry.hours = schedule.hours;
+        entry.updatedAt = DateTime.now();
         changed = true;
       }
     } else {
@@ -750,6 +844,7 @@ class ProjectStore extends ChangeNotifier {
       }
     }
     if (!changed) return;
+    entry.updatedAt = DateTime.now();
     entry.history
         .add(AuditEntry(kurzzeichen: actor, action: 'Anwesenheit synchronisiert'));
     notifyListeners();
@@ -760,7 +855,9 @@ class ProjectStore extends ChangeNotifier {
     String projectId, {
     required bool enabled,
   }) async {
-    _project(projectId).extendedTimeCalendar = enabled;
+    final project = _project(projectId);
+    project.extendedTimeCalendar = enabled;
+    project.updatedAt = DateTime.now();
     notifyListeners();
     await _persist();
   }
@@ -793,9 +890,11 @@ class ProjectStore extends ChangeNotifier {
   ) async {
     final project = _project(projectId);
     project.workTimeProfiles.removeWhere((p) => p.id == profileId);
+    project.deletedIds[profileId] = DateTime.now();
     if (project.activeWorkTimeProfileId == profileId) {
       project.activeWorkTimeProfileId = null;
     }
+    project.updatedAt = DateTime.now();
     notifyListeners();
     await _persist();
   }
@@ -806,7 +905,9 @@ class ProjectStore extends ChangeNotifier {
     String projectId, {
     required String? profileId,
   }) async {
-    _project(projectId).activeWorkTimeProfileId = profileId;
+    final project = _project(projectId);
+    project.activeWorkTimeProfileId = profileId;
+    project.updatedAt = DateTime.now();
     notifyListeners();
     await _persist();
   }
@@ -838,6 +939,7 @@ class ProjectStore extends ChangeNotifier {
           project.workDayEntries.where((e) => e.date.isAtSameMomentAs(day));
       if (existing.isNotEmpty) {
         existing.first.hours = schedule.hours;
+        existing.first.updatedAt = DateTime.now();
         existing.first.history.add(entry);
       } else {
         project.workDayEntries.add(WorkDayEntry(

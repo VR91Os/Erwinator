@@ -9,11 +9,23 @@ abstract class GewerkModule {
   // im selben Gewerk zu unterscheiden). Leer = Standard-Bezeichnung.
   String label;
 
-  GewerkModule(this.id, {this.label = ''});
+  // Für den Sync-Merge (Option C): wann Label o.ä. zuletzt geändert wurde.
+  DateTime updatedAt;
+
+  GewerkModule(this.id, {this.label = '', DateTime? updatedAt})
+      : updatedAt = updatedAt ?? DateTime.now();
 
   String get type;
 
   Map<String, dynamic> toMap();
+
+  // Sync-Merge (Option C): typ-spezifisch überschrieben, damit Inhalte
+  // (Aufgaben/Kontakte/Dateien) per ID statt komplett ersetzt werden.
+  // [tombstones] (projektweite id -> Löschzeitpunkt) wird bis in die
+  // innersten Listen (z.B. Datei-Markierungen) durchgereicht. Unterschiedlicher
+  // Modultyp bei gleicher ID sollte nie vorkommen – Fallback: lokale Version
+  // behalten, statt zu raten.
+  GewerkModule mergeFrom(GewerkModule remote, Map<String, DateTime> tombstones);
 
   static GewerkModule fromMap(Map<String, dynamic> map) {
     final type = map['type'] as String;

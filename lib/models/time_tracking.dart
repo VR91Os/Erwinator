@@ -1,4 +1,5 @@
 import 'audit_entry.dart';
+import '../utils/id_merge.dart';
 
 int _minutesOf(String hhmm) {
   final parts = hhmm.split(':');
@@ -50,12 +51,15 @@ class WorkTimeProfile {
   String id;
   String name;
   List<WeekdaySchedule> schedules;
+  DateTime updatedAt;
 
   WorkTimeProfile({
     required this.id,
     required this.name,
     List<WeekdaySchedule>? schedules,
-  }) : schedules = schedules ?? [];
+    DateTime? updatedAt,
+  })  : schedules = schedules ?? [],
+        updatedAt = updatedAt ?? DateTime.now();
 
   WeekdaySchedule? scheduleFor(int weekday) {
     for (final s in schedules) {
@@ -68,6 +72,7 @@ class WorkTimeProfile {
         'id': id,
         'name': name,
         'schedules': schedules.map((s) => s.toMap()).toList(),
+        'updatedAt': updatedAt.toIso8601String(),
       };
 
   factory WorkTimeProfile.fromMap(Map<String, dynamic> map) =>
@@ -77,7 +82,15 @@ class WorkTimeProfile {
         schedules: (map['schedules'] as List<dynamic>? ?? [])
             .map((e) => WeekdaySchedule.fromMap(e as Map<String, dynamic>))
             .toList(),
+        updatedAt: map['updatedAt'] == null
+            ? DateTime.fromMillisecondsSinceEpoch(0)
+            : DateTime.parse(map['updatedAt'] as String),
       );
+
+  // Sync-Merge (Option C): wird immer als Ganzes ersetzt (siehe
+  // updateWorkTimeProfile) -> neuere Seite gewinnt komplett, inkl. Zeitplan.
+  WorkTimeProfile mergeFrom(WorkTimeProfile remote) =>
+      newerOf(this, remote, (p) => p.updatedAt);
 }
 
 // Ein einzelner erfasster Arbeitstag am Projekt (aus einem Profil erzeugt
@@ -91,6 +104,7 @@ class WorkDayEntry {
 
   // Verlauf: wer hat den Tag erfasst/angepasst.
   List<AuditEntry> history;
+  DateTime updatedAt;
 
   WorkDayEntry({
     required this.id,
@@ -98,8 +112,10 @@ class WorkDayEntry {
     required this.hours,
     List<String>? helperNames,
     List<AuditEntry>? history,
+    DateTime? updatedAt,
   })  : helperNames = helperNames ?? [],
-        history = history ?? [];
+        history = history ?? [],
+        updatedAt = updatedAt ?? DateTime.now();
 
   Map<String, dynamic> toMap() => {
         'id': id,
@@ -107,6 +123,7 @@ class WorkDayEntry {
         'hours': hours,
         'helperNames': helperNames,
         'history': history.map((h) => h.toMap()).toList(),
+        'updatedAt': updatedAt.toIso8601String(),
       };
 
   factory WorkDayEntry.fromMap(Map<String, dynamic> map) => WorkDayEntry(
@@ -119,5 +136,22 @@ class WorkDayEntry {
         history: (map['history'] as List<dynamic>? ?? [])
             .map((e) => AuditEntry.fromMap(e as Map<String, dynamic>))
             .toList(),
+        updatedAt: map['updatedAt'] == null
+            ? DateTime.fromMillisecondsSinceEpoch(0)
+            : DateTime.parse(map['updatedAt'] as String),
       );
+
+  // Sync-Merge (Option C): Stunden + Helferliste von der neueren Seite,
+  // Verlauf verlustfrei vereinigt.
+  WorkDayEntry mergeFrom(WorkDayEntry remote) {
+    final winner = newerOf(this, remote, (e) => e.updatedAt);
+    return WorkDayEntry(
+      id: id,
+      date: date,
+      hours: winner.hours,
+      helperNames: winner.helperNames,
+      updatedAt: winner.updatedAt,
+      history: mergeHistory(history, remote.history),
+    );
+  }
 }

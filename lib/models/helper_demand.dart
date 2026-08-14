@@ -1,3 +1,4 @@
+import '../utils/id_merge.dart';
 import 'audit_entry.dart';
 
 class HelperSignup {
@@ -41,6 +42,7 @@ class HelperDemand {
 
   // Verlauf: wer hat den Bedarf eingetragen/Helfer eingetragen.
   List<AuditEntry> history;
+  DateTime updatedAt;
 
   HelperDemand({
     required this.id,
@@ -49,8 +51,10 @@ class HelperDemand {
     this.note = '',
     List<HelperSignup>? signups,
     List<AuditEntry>? history,
+    DateTime? updatedAt,
   })  : signups = signups ?? [],
-        history = history ?? [];
+        history = history ?? [],
+        updatedAt = updatedAt ?? DateTime.now();
 
   Map<String, dynamic> toMap() => {
         'id': id,
@@ -59,6 +63,7 @@ class HelperDemand {
         'note': note,
         'signups': signups.map((s) => s.toMap()).toList(),
         'history': history.map((h) => h.toMap()).toList(),
+        'updatedAt': updatedAt.toIso8601String(),
       };
 
   factory HelperDemand.fromMap(Map<String, dynamic> map) => HelperDemand(
@@ -72,5 +77,32 @@ class HelperDemand {
         history: (map['history'] as List<dynamic>? ?? [])
             .map((e) => AuditEntry.fromMap(e as Map<String, dynamic>))
             .toList(),
+        updatedAt: map['updatedAt'] == null
+            ? DateTime.fromMillisecondsSinceEpoch(0)
+            : DateTime.parse(map['updatedAt'] as String),
       );
+
+  // Sync-Merge (Option C): neueste Seite liefert Bedarf/Notiz, Zusagen
+  // per ID vereinigt (Tombstones, da Zusagen entfernbar sind – Zusagen
+  // selbst haben keinen eigenen Zeitstempel, ein Tombstone gewinnt dort
+  // also immer, "Edit schlägt Delete" ist für sie nicht sinnvoll anwendbar).
+  HelperDemand mergeFrom(HelperDemand remote, Map<String, DateTime> tombstones) {
+    final winner = newerOf(this, remote, (d) => d.updatedAt);
+    return HelperDemand(
+      id: id,
+      date: date,
+      neededCount: winner.neededCount,
+      note: winner.note,
+      updatedAt: winner.updatedAt,
+      signups: mergeById<HelperSignup>(
+        local: signups,
+        remote: remote.signups,
+        idOf: (s) => s.id,
+        updatedAtOf: (_) => epoch,
+        combine: (l, r) => l,
+        tombstones: tombstones,
+      ),
+      history: mergeHistory(history, remote.history),
+    );
+  }
 }

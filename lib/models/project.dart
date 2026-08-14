@@ -1,6 +1,7 @@
 import 'gewerk.dart';
 import 'helper_demand.dart';
 import 'time_tracking.dart';
+import '../utils/id_merge.dart';
 
 class Project {
   String id;
@@ -73,6 +74,19 @@ class Project {
   // automatisch mit in die Zeitstatistik.
   List<String> onSitePresence;
 
+  // Wann eines der obigen Projekt-weiten Felder zuletzt geändert wurde
+  // (für den Sync-Merge, Option C).
+  DateTime updatedAt;
+
+  // Projektweite Tombstones fürs Sync-Merge: id (Gewerk, Modul, Aufgabe,
+  // Kontakt, Datei-Markierung, Helfer-Zusage, Arbeitszeitprofil, ...) ->
+  // Löschzeitpunkt. IDs sind app-weit eindeutig (newId()), daher reicht
+  // eine einzige Map für alle verschachtelten Listen. Verhindert, dass ein
+  // gelöschtes Element durch die andere Sync-Seite wiederaufersteht –
+  // außer es wurde dort NACH der Löschung noch bearbeitet ("Edit schlägt
+  // Delete").
+  Map<String, DateTime> deletedIds;
+
   // ID der Zeile in der Supabase-Tabelle "shared_projects", sobald das
   // Projekt geteilt wurde. null = nur lokal, nicht geteilt.
   String? sharedId;
@@ -100,12 +114,16 @@ class Project {
     List<WorkDayEntry>? workDayEntries,
     this.activeWorkTimeProfileId,
     List<String>? onSitePresence,
+    DateTime? updatedAt,
+    Map<String, DateTime>? deletedIds,
     this.sharedId,
   })  : gewerke = gewerke ?? [],
         helperDemands = helperDemands ?? [],
         workTimeProfiles = workTimeProfiles ?? [],
         workDayEntries = workDayEntries ?? [],
-        onSitePresence = onSitePresence ?? [];
+        onSitePresence = onSitePresence ?? [],
+        updatedAt = updatedAt ?? DateTime.now(),
+        deletedIds = deletedIds ?? {};
 
   Map<String, dynamic> toMap() => {
         'id': id,
@@ -130,6 +148,9 @@ class Project {
         'workDayEntries': workDayEntries.map((e) => e.toMap()).toList(),
         'activeWorkTimeProfileId': activeWorkTimeProfileId,
         'onSitePresence': onSitePresence,
+        'updatedAt': updatedAt.toIso8601String(),
+        'deletedIds': deletedIds
+            .map((id, deletedAt) => MapEntry(id, deletedAt.toIso8601String())),
         'sharedId': sharedId,
       };
 
@@ -169,6 +190,12 @@ class Project {
         onSitePresence: (map['onSitePresence'] as List<dynamic>? ?? [])
             .map((e) => e as String)
             .toList(),
+        updatedAt: map['updatedAt'] == null
+            ? DateTime.fromMillisecondsSinceEpoch(0)
+            : DateTime.parse(map['updatedAt'] as String),
+        deletedIds: (map['deletedIds'] as Map<String, dynamic>? ?? {}).map(
+          (id, deletedAt) => MapEntry(id, DateTime.parse(deletedAt as String)),
+        ),
         sharedId: map['sharedId'] as String?,
       );
 
@@ -179,5 +206,80 @@ class Project {
       if (p.id == id) return p;
     }
     return null;
+  }
+
+  // Sync-Merge (Option C), siehe lib/utils/id_merge.dart: statt das ganze
+  // Projekt bei jeder Änderung 1:1 zu ersetzen, werden Gewerke/Module/
+  // Aufgaben/Kontakte/Dateien/Helferbedarfe/Arbeitszeit-Daten per ID
+  // zusammengeführt. Nur die Projekt-weiten Einstellungsfelder (oben,
+  // exportAllDatedTodos etc.) werden als Ganzes von der neueren Seite
+  // übernommen – Konflikte dort sind selten und weniger kritisch als der
+  // Verlust einzelner Aufgaben/Dateien.
+  Project mergeFrom(Project remote) {
+    final tombstones = <String, DateTime>{...deletedIds};
+    for (final entry in remote.deletedIds.entries) {
+      final existing = tombstones[entry.key];
+      if (existing == null || entry.value.isAfter(existing)) {
+        tombstones[entry.key] = entry.value;
+      }
+    }
+
+    final winner = newerOf(this, remote, (p) => p.updatedAt);
+
+    return Project(
+      id,
+      winner.name,
+      address: winner.address,
+      projectType: winner.projectType,
+      exportAllDatedTodos: winner.exportAllDatedTodos,
+      exportPriorityTasks: winner.exportPriorityTasks,
+      priorityWarningDays: winner.priorityWarningDays,
+      notifyOnPriorityWarning: winner.notifyOnPriorityWarning,
+      skipPartialStatus: winner.skipPartialStatus,
+      shiftDays: winner.shiftDays,
+      archiveAfterDays: winner.archiveAfterDays,
+      moveCompletedToArchiveToo: winner.moveCompletedToArchiveToo,
+      deleteArchivedTasksPermanently: winner.deleteArchivedTasksPermanently,
+      deleteArchivedAfterDays: winner.deleteArchivedAfterDays,
+      timeTrackingEnabled: winner.timeTrackingEnabled,
+      extendedTimeCalendar: winner.extendedTimeCalendar,
+      activeWorkTimeProfileId: winner.activeWorkTimeProfileId,
+      onSitePresence: winner.onSitePresence,
+      updatedAt: winner.updatedAt,
+      deletedIds: tombstones,
+      sharedId: sharedId ?? remote.sharedId,
+      gewerke: mergeById<Gewerk>(
+        local: gewerke,
+        remote: remote.gewerke,
+        idOf: (g) => g.id,
+        updatedAtOf: (g) => g.updatedAt,
+        combine: (l, r) => l.mergeFrom(r, tombstones: tombstones),
+        tombstones: tombstones,
+      ),
+      helperDemands: mergeById<HelperDemand>(
+        local: helperDemands,
+        remote: remote.helperDemands,
+        idOf: (d) => d.id,
+        updatedAtOf: (d) => d.updatedAt,
+        combine: (l, r) => l.mergeFrom(r, tombstones),
+        tombstones: tombstones,
+      ),
+      workTimeProfiles: mergeById<WorkTimeProfile>(
+        local: workTimeProfiles,
+        remote: remote.workTimeProfiles,
+        idOf: (p) => p.id,
+        updatedAtOf: (p) => p.updatedAt,
+        combine: (l, r) => l.mergeFrom(r),
+        tombstones: tombstones,
+      ),
+      workDayEntries: mergeById<WorkDayEntry>(
+        local: workDayEntries,
+        remote: remote.workDayEntries,
+        idOf: (e) => e.id,
+        updatedAtOf: (e) => e.updatedAt,
+        combine: (l, r) => l.mergeFrom(r),
+        tombstones: tombstones,
+      ),
+    );
   }
 }

@@ -1,5 +1,6 @@
 import 'audit_entry.dart';
 import 'checklist_item.dart';
+import '../utils/id_merge.dart';
 
 class Task {
   String id;
@@ -79,4 +80,28 @@ class Task {
             .map((e) => AuditEntry.fromMap(e as Map<String, dynamic>))
             .toList(),
       );
+
+  // Sync-Merge (Option C): die Seite mit der neueren updatedAt liefert die
+  // inhaltlichen Felder (Name, Status, Fälligkeit, Checkliste – dafür hat
+  // ChecklistItem keine eigene ID, ein Item-genauer Merge ist daher nicht
+  // möglich), der Verlauf wird verlustfrei aus beiden Seiten vereinigt,
+  // damit kein Audit-Eintrag verschwindet, egal welche Seite "gewinnt".
+  Task mergeFrom(Task remote) {
+    final winner = newerOf(this, remote, (t) => t.updatedAt);
+    final itemRefsUnion = {...itemRefs, ...remote.itemRefs}.toList();
+    return Task(
+      id,
+      winner.name,
+      description: winner.description,
+      status: winner.status,
+      isHighPriority: winner.isHighPriority,
+      dueDate: winner.dueDate,
+      checklist: winner.checklist,
+      itemRefs: itemRefsUnion,
+      createdBy: createdBy,
+      createdAt: createdAt,
+      updatedAt: winner.updatedAt,
+      history: mergeHistory(history, remote.history),
+    );
+  }
 }
