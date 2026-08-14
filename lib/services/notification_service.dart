@@ -1,6 +1,7 @@
 import 'package:flutter/foundation.dart';
 import 'package:flutter_local_notifications/flutter_local_notifications.dart';
 import 'package:flutter_timezone/flutter_timezone.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 import 'package:timezone/data/latest.dart' as tz_data;
 import 'package:timezone/timezone.dart' as tz;
 
@@ -66,6 +67,11 @@ class NotificationService {
   // Stabile Notification-ID aus der (app-weit eindeutigen) Task-ID.
   int _notificationId(String taskId) => taskId.hashCode & 0x7fffffff;
 
+  // Merkt sich lokal, für welche Aufgaben bereits eine
+  // Nachhol-Benachrichtigung (siehe unten) gezeigt wurde, damit sie bei
+  // jedem Sync (der bei jeder Projekt-Änderung läuft) nicht erneut feuert.
+  static const _catchUpPrefsKey = 'baustelli_overdue_notified_task_ids';
+
   Future<void> syncForProjects(List<Project> projects) async {
     if (!_initialized) return;
     try {
@@ -73,6 +79,11 @@ class NotificationService {
     } catch (_) {
       return;
     }
+
+    final prefs = await SharedPreferences.getInstance();
+    final alreadyNotified =
+        (prefs.getStringList(_catchUpPrefsKey) ?? const []).toSet();
+    final stillOverdue = <String>{};
 
     final now = DateTime.now();
     for (final project in projects) {
@@ -87,17 +98,35 @@ class NotificationService {
             }
             final target = task.dueDate!
                 .subtract(Duration(days: project.priorityWarningDays));
-            if (!target.isAfter(now)) continue;
-            await _schedule(
-              id: _notificationId(task.id),
-              scheduledDate: target,
-              title: 'Prio-Aufgabe bald fällig: ${gewerk.name}',
-              body: '${project.name}: ${task.name}',
-            );
+            if (target.isAfter(now)) {
+              await _schedule(
+                id: _notificationId(task.id),
+                scheduledDate: target,
+                title: 'Prio-Aufgabe bald fällig: ${gewerk.name}',
+                body: '${project.name}: ${task.name}',
+              );
+              continue;
+            }
+            // Warnschwelle liegt bereits in der Vergangenheit – die App
+            // war zu dem Zeitpunkt vermutlich nicht offen, sonst wäre
+            // die Aufgabe schon oben geplant worden. Statt sie
+            // stillschweigend zu überspringen, einmalig sofort nachholen.
+            stillOverdue.add(task.id);
+            if (!alreadyNotified.contains(task.id)) {
+              await _showNow(
+                id: _notificationId(task.id),
+                title: 'Prio-Aufgabe überfällig: ${gewerk.name}',
+                body: '${project.name}: ${task.name}',
+              );
+            }
           }
         }
       }
     }
+
+    try {
+      await prefs.setStringList(_catchUpPrefsKey, stillOverdue.toList());
+    } catch (_) {}
   }
 
   Future<void> _schedule({
@@ -113,6 +142,38 @@ class NotificationService {
         body: body,
         scheduledDate: tz.TZDateTime.from(scheduledDate, tz.local),
         androidScheduleMode: AndroidScheduleMode.exactAllowWhileIdle,
+        notificationDetails: const NotificationDetails(
+          android: AndroidNotificationDetails(
+            'priority_warning',
+            'Prio-Aufgaben-Warnung',
+            channelDescription:
+                'Benachrichtigung, wenn eine offene Prio-Aufgabe die '
+                'eingestellte Warnschwelle vor der Fälligkeit erreicht.',
+            importance: Importance.high,
+            priority: Priority.high,
+          ),
+          iOS: DarwinNotificationDetails(),
+          macOS: DarwinNotificationDetails(),
+        ),
+      );
+    } catch (_) {
+      // Fehlende Berechtigung o.ä. -> die farbliche Reiter-Markierung bleibt
+      // in jedem Fall als Hinweis bestehen, die App darf nicht abstürzen.
+    }
+  }
+
+  // Sofortige Nachhol-Benachrichtigung für eine Warnschwelle, die die App
+  // bereits verpasst hat (siehe syncForProjects), statt einer zeitgeplanten.
+  Future<void> _showNow({
+    required int id,
+    required String title,
+    required String body,
+  }) async {
+    try {
+      await _plugin.show(
+        id: id,
+        title: title,
+        body: body,
         notificationDetails: const NotificationDetails(
           android: AndroidNotificationDetails(
             'priority_warning',

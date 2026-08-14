@@ -1,10 +1,12 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 
+import '../services/error_log_service.dart';
 import '../state/settings_store.dart';
 import '../utils/holidays.dart';
 import '../utils/kurzzeichen.dart';
 import '../widgets/app_bar.dart';
+import 'error_log_screen.dart';
 
 class SettingsScreen extends StatefulWidget {
   const SettingsScreen({super.key});
@@ -51,7 +53,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
       context: context,
       builder: (dialogContext) {
         return AlertDialog(
-          title: const Text("Nutzer zum Teilen einladen"),
+          title: const Text("Team-Mitglied hinzufügen"),
           content: Column(
             mainAxisSize: MainAxisSize.min,
             children: [
@@ -81,7 +83,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
                     );
                 Navigator.pop(dialogContext);
               },
-              child: const Text("Einladen"),
+              child: const Text("Hinzufügen"),
             ),
           ],
         );
@@ -195,19 +197,23 @@ class _SettingsScreenState extends State<SettingsScreen> {
           const Divider(height: 32),
 
           const Text(
-            "Teilen",
+            "Team-Mitglieder (für Kürzel)",
             style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
           ),
           const SizedBox(height: 4),
           const Text(
-            "Eingeladene Nutzer werden nur lokal gemerkt – ein echter Versand ist noch nicht angebunden.",
+            "Nur lokal auf diesem Gerät gemerkt, damit dein automatisch "
+            "generiertes Namenskürzel oben nicht mit dem anderer "
+            "Team-Mitglieder kollidiert – kein Projekt-Teilen. Ein Projekt "
+            "teilst du direkt im jeweiligen Projekt über \"Projekt teilen\" "
+            "(Einladungscode/QR-Code).",
             style: TextStyle(color: Colors.grey),
           ),
           const SizedBox(height: 8),
           if (settings.invitedUsers.isEmpty)
             const Padding(
               padding: EdgeInsets.symmetric(vertical: 8),
-              child: Text("Noch niemand eingeladen"),
+              child: Text("Noch keine weiteren Team-Mitglieder erfasst"),
             ),
           ...settings.invitedUsers.map((user) {
             return ListTile(
@@ -232,7 +238,36 @@ class _SettingsScreenState extends State<SettingsScreen> {
           ElevatedButton.icon(
             onPressed: _showInviteDialog,
             icon: const Icon(Icons.person_add_alt),
-            label: const Text("Nutzer einladen"),
+            label: const Text("Team-Mitglied hinzufügen"),
+          ),
+          const Divider(height: 32),
+
+          const Text(
+            "Diagnose",
+            style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
+          ),
+          const SizedBox(height: 8),
+          Consumer<ErrorLogService>(
+            builder: (context, errorLog, _) => ListTile(
+              contentPadding: EdgeInsets.zero,
+              leading: Icon(
+                errorLog.entries.isEmpty
+                    ? Icons.check_circle_outline
+                    : Icons.warning_amber_outlined,
+                color: errorLog.entries.isEmpty ? null : Colors.orange,
+              ),
+              title: const Text("Fehlerprotokoll"),
+              subtitle: Text(
+                errorLog.entries.isEmpty
+                    ? "Keine Fehler aufgezeichnet"
+                    : "${errorLog.entries.length} aufgezeichnet",
+              ),
+              trailing: const Icon(Icons.chevron_right),
+              onTap: () => Navigator.push(
+                context,
+                MaterialPageRoute(builder: (context) => const ErrorLogScreen()),
+              ),
+            ),
           ),
         ],
       ),
