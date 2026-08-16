@@ -194,6 +194,28 @@ class _OverviewSettingsScreenState extends State<OverviewSettingsScreen> {
           ),
           const Divider(height: 40),
           const Text(
+            "Finanzen",
+            style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
+          ),
+          const SizedBox(height: 4),
+          const Text(
+            "Optionales Modul: erkennt bei PDF-Uploads automatisch Angebote/"
+            "Rechnungen samt Betrag (Vorschlag, immer manuell zu bestätigen) "
+            "und fasst sie projektweit sowie je Gewerk zusammen. Legt keine "
+            "Dateien doppelt ab, nur die Betragsdaten.",
+            style: TextStyle(color: Colors.grey),
+          ),
+          CheckboxListTile(
+            contentPadding: EdgeInsets.zero,
+            title: const Text("Finanzen-Modul aktivieren"),
+            value: project.financeEnabled,
+            onChanged: (value) => store.updateFinanceEnabled(
+              widget.projectId,
+              enabled: value ?? false,
+            ),
+          ),
+          const Divider(height: 40),
+          const Text(
             "Projekt teilen",
             style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
           ),

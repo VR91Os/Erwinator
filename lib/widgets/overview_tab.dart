@@ -146,6 +146,9 @@ class _OverviewTabState extends State<OverviewTab> {
     return taskWidget(
       ref.task,
       context,
+      projectId: widget.project.id,
+      gewerkId: ref.gewerkId,
+      moduleId: ref.moduleId,
       onStatusTap: () => store.updateTaskStatus(
           widget.project.id, ref.gewerkId, ref.moduleId, ref.task.id,
           actor: actor),
@@ -617,7 +620,7 @@ class _OnSitePresenceRow extends StatelessWidget {
   Widget build(BuildContext context) {
     final store = context.read<ProjectStore>();
     final myName = context.watch<SettingsStore>().currentUserDisplayName;
-    final isPresent = project.onSitePresence.contains(myName);
+    final isPresent = project.onSitePresence.any((e) => e.person == myName);
 
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,

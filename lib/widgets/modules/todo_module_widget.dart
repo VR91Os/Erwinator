@@ -43,6 +43,9 @@ class TodoModuleWidget extends StatelessWidget {
       return taskWidget(
         task,
         context,
+        projectId: projectId,
+        gewerkId: gewerkId,
+        moduleId: module.id,
         onStatusTap: () => store.updateTaskStatus(
             projectId, gewerkId, module.id, task.id,
             actor: actor),

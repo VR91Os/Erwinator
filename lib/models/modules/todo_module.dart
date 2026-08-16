@@ -46,7 +46,7 @@ class TodoModule extends GewerkModule {
         remote: remote.tasks,
         idOf: (t) => t.id,
         updatedAtOf: (t) => t.updatedAt,
-        combine: (l, r) => l.mergeFrom(r),
+        combine: (l, r) => l.mergeFrom(r, tombstones),
         tombstones: tombstones,
       ),
     );

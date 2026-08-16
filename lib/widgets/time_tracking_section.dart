@@ -227,7 +227,8 @@ class _TimeTrackingSectionState extends State<TimeTrackingSection> {
                         const Text("Keine Helfer eingetragen")
                       else
                         Text(
-                            "Helfer: ${selectedEntry.helperNames.join(', ')}"),
+                          "Helfer: ${selectedEntry.helperNames.map((p) => p.person).join(', ')}",
+                        ),
                     ],
                   ),
           ),

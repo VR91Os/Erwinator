@@ -352,5 +352,10 @@ void _showProfileEditorDialog(
         },
       );
     },
-  );
+  ).then((_) {
+    nameController.dispose();
+    for (final row in rows) {
+      row.breakController.dispose();
+    }
+  });
 }

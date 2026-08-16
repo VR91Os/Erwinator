@@ -1,5 +1,7 @@
+import 'finance_entry.dart';
 import 'gewerk.dart';
 import 'helper_demand.dart';
+import 'presence_entry.dart';
 import 'time_tracking.dart';
 import '../utils/id_merge.dart';
 
@@ -67,12 +69,23 @@ class Project {
   // aktiven Profil einen Zeitplan hat, werden automatisch mit den daraus
   // berechneten Stunden in die Zeitstatistik übernommen.
   String? activeWorkTimeProfileId;
-  // Namen der Nutzer, die den Schalter "Ich bin auf der Baustelle"
-  // aktuell aktiv haben (V1: einfacher, dauerhafter Anwesenheits-Status
-  // statt täglicher Checkbox). Solange ein Name hier eingetragen ist,
-  // zählt jeder Tag, der laut aktivem Profil ein Arbeitstag ist,
-  // automatisch mit in die Zeitstatistik.
-  List<String> onSitePresence;
+  // Nutzer, die den Schalter "Ich bin auf der Baustelle" aktuell aktiv
+  // haben (V1: einfacher, dauerhafter Anwesenheits-Status statt täglicher
+  // Checkbox). Solange ein Nutzer hier eingetragen ist, zählt jeder Tag,
+  // der laut aktivem Profil ein Arbeitstag ist, automatisch mit in die
+  // Zeitstatistik. Jeder Eintrag trägt einen eigenen Zeitstempel (statt
+  // einer reinen Namensliste), damit ein Ein-/Ausschalten auf zwei Geräten
+  // beim Sync-Merge feldweise statt als Ganzes aufgelöst werden kann.
+  List<PresenceEntry> onSitePresence;
+
+  // Projektweites, optionales Finanzen-Modul: sammelt aus Angeboten/
+  // Rechnungen ausgelesene bzw. manuell erfasste Beträge, referenziert die
+  // Quelldatei nur über ihre IDs (kein doppeltes Ablegen). Projektweit
+  // gehalten (wie workDayEntries), damit eine Gesamtübersicht über alle
+  // Gewerke hinweg möglich ist; ein optionales FinanceModule pro Gewerk
+  // zeigt nur eine gefilterte Sicht darauf.
+  bool financeEnabled;
+  List<FinanceEntry> financeEntries;
 
   // Wann eines der obigen Projekt-weiten Felder zuletzt geändert wurde
   // (für den Sync-Merge, Option C).
@@ -113,7 +126,9 @@ class Project {
     List<WorkTimeProfile>? workTimeProfiles,
     List<WorkDayEntry>? workDayEntries,
     this.activeWorkTimeProfileId,
-    List<String>? onSitePresence,
+    List<PresenceEntry>? onSitePresence,
+    this.financeEnabled = false,
+    List<FinanceEntry>? financeEntries,
     DateTime? updatedAt,
     Map<String, DateTime>? deletedIds,
     this.sharedId,
@@ -122,6 +137,7 @@ class Project {
         workTimeProfiles = workTimeProfiles ?? [],
         workDayEntries = workDayEntries ?? [],
         onSitePresence = onSitePresence ?? [],
+        financeEntries = financeEntries ?? [],
         updatedAt = updatedAt ?? DateTime.now(),
         deletedIds = deletedIds ?? {};
 
@@ -147,7 +163,9 @@ class Project {
         'workTimeProfiles': workTimeProfiles.map((p) => p.toMap()).toList(),
         'workDayEntries': workDayEntries.map((e) => e.toMap()).toList(),
         'activeWorkTimeProfileId': activeWorkTimeProfileId,
-        'onSitePresence': onSitePresence,
+        'onSitePresence': onSitePresence.map((e) => e.toMap()).toList(),
+        'financeEnabled': financeEnabled,
+        'financeEntries': financeEntries.map((e) => e.toMap()).toList(),
         'updatedAt': updatedAt.toIso8601String(),
         'deletedIds': deletedIds
             .map((id, deletedAt) => MapEntry(id, deletedAt.toIso8601String())),
@@ -188,7 +206,11 @@ class Project {
             .toList(),
         activeWorkTimeProfileId: map['activeWorkTimeProfileId'] as String?,
         onSitePresence: (map['onSitePresence'] as List<dynamic>? ?? [])
-            .map((e) => e as String)
+            .map((e) => PresenceEntry.fromAny(e))
+            .toList(),
+        financeEnabled: map['financeEnabled'] as bool? ?? false,
+        financeEntries: (map['financeEntries'] as List<dynamic>? ?? [])
+            .map((e) => FinanceEntry.fromMap(e as Map<String, dynamic>))
             .toList(),
         updatedAt: map['updatedAt'] == null
             ? DateTime.fromMillisecondsSinceEpoch(0)
@@ -198,6 +220,17 @@ class Project {
         ),
         sharedId: map['sharedId'] as String?,
       );
+
+  // Tombstones sammeln sich sonst über die gesamte Projektlaufzeit
+  // unbegrenzt an (jede Löschung fügt einen Eintrag hinzu, der nie entfernt
+  // wird) und vergrößern die JSON-Payload lokal und bei jedem Sync-Push
+  // immer weiter. Nach dieser Frist ist "Edit schlägt Delete" ohnehin nicht
+  // mehr relevant: kein Gerät dürfte so lange offline sein, dass es noch
+  // eine ältere, unbearbeitete Kopie des gelöschten Elements hält.
+  void pruneTombstones({Duration retention = const Duration(days: 180)}) {
+    final cutoff = DateTime.now().subtract(retention);
+    deletedIds.removeWhere((_, deletedAt) => deletedAt.isBefore(cutoff));
+  }
 
   WorkTimeProfile? get activeWorkTimeProfile {
     final id = activeWorkTimeProfileId;
@@ -244,7 +277,7 @@ class Project {
       timeTrackingEnabled: winner.timeTrackingEnabled,
       extendedTimeCalendar: winner.extendedTimeCalendar,
       activeWorkTimeProfileId: winner.activeWorkTimeProfileId,
-      onSitePresence: winner.onSitePresence,
+      financeEnabled: winner.financeEnabled,
       updatedAt: winner.updatedAt,
       deletedIds: tombstones,
       sharedId: sharedId ?? remote.sharedId,
@@ -275,6 +308,27 @@ class Project {
       workDayEntries: mergeById<WorkDayEntry>(
         local: workDayEntries,
         remote: remote.workDayEntries,
+        idOf: (e) => e.id,
+        updatedAtOf: (e) => e.updatedAt,
+        combine: (l, r) => l.mergeFrom(r, tombstones),
+        tombstones: tombstones,
+      ),
+      // Feldweiser statt kompletter Merge (anders als die übrigen
+      // Projekt-weiten Felder oben, die als Ganzes von der neueren Seite
+      // übernommen werden): sonst würde ein gleichzeitiges An-/Abmelden
+      // zweier Nutzer auf zwei Geräten dazu führen, dass einer der beiden
+      // Zustände beim Merge komplett verloren geht.
+      onSitePresence: mergeById<PresenceEntry>(
+        local: onSitePresence,
+        remote: remote.onSitePresence,
+        idOf: (e) => 'presence:${e.person}',
+        updatedAtOf: (e) => e.updatedAt,
+        combine: (l, r) => newerOf(l, r, (e) => e.updatedAt),
+        tombstones: tombstones,
+      ),
+      financeEntries: mergeById<FinanceEntry>(
+        local: financeEntries,
+        remote: remote.financeEntries,
         idOf: (e) => e.id,
         updatedAtOf: (e) => e.updatedAt,
         combine: (l, r) => l.mergeFrom(r),

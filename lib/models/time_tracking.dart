@@ -1,4 +1,5 @@
 import 'audit_entry.dart';
+import 'presence_entry.dart';
 import '../utils/id_merge.dart';
 
 int _minutesOf(String hhmm) {
@@ -100,7 +101,7 @@ class WorkDayEntry {
   String id;
   DateTime date;
   double hours;
-  List<String> helperNames;
+  List<PresenceEntry> helperNames;
 
   // Verlauf: wer hat den Tag erfasst/angepasst.
   List<AuditEntry> history;
@@ -110,7 +111,7 @@ class WorkDayEntry {
     required this.id,
     required this.date,
     required this.hours,
-    List<String>? helperNames,
+    List<PresenceEntry>? helperNames,
     List<AuditEntry>? history,
     DateTime? updatedAt,
   })  : helperNames = helperNames ?? [],
@@ -121,7 +122,7 @@ class WorkDayEntry {
         'id': id,
         'date': date.toIso8601String(),
         'hours': hours,
-        'helperNames': helperNames,
+        'helperNames': helperNames.map((e) => e.toMap()).toList(),
         'history': history.map((h) => h.toMap()).toList(),
         'updatedAt': updatedAt.toIso8601String(),
       };
@@ -131,7 +132,7 @@ class WorkDayEntry {
         date: DateTime.parse(map['date'] as String),
         hours: (map['hours'] as num).toDouble(),
         helperNames: (map['helperNames'] as List<dynamic>? ?? [])
-            .map((e) => e as String)
+            .map((e) => PresenceEntry.fromAny(e))
             .toList(),
         history: (map['history'] as List<dynamic>? ?? [])
             .map((e) => AuditEntry.fromMap(e as Map<String, dynamic>))
@@ -141,16 +142,28 @@ class WorkDayEntry {
             : DateTime.parse(map['updatedAt'] as String),
       );
 
-  // Sync-Merge (Option C): Stunden + Helferliste von der neueren Seite,
-  // Verlauf verlustfrei vereinigt.
-  WorkDayEntry mergeFrom(WorkDayEntry remote) {
+  // Sync-Merge (Option C): Stunden von der neueren Seite, Helferliste
+  // feldweise per Tombstone gemerged (sonst würde das Entfernen eines
+  // Helfers auf einem Gerät durch eine Ergänzung auf einem anderen Gerät
+  // rückgängig gemacht, sobald dessen Seite beim Stunden-Feld "gewinnt"),
+  // Verlauf verlustfrei vereinigt. [tombstones] kommt vom umschließenden
+  // Project.mergeFrom, da Helfer-Tombstones dort projektweit verwaltet
+  // werden (Schlüssel 'helper:$id:$person', siehe ProjectStore).
+  WorkDayEntry mergeFrom(WorkDayEntry remote, Map<String, DateTime> tombstones) {
     final winner = newerOf(this, remote, (e) => e.updatedAt);
     return WorkDayEntry(
       id: id,
       date: date,
       hours: winner.hours,
-      helperNames: winner.helperNames,
       updatedAt: winner.updatedAt,
+      helperNames: mergeById<PresenceEntry>(
+        local: helperNames,
+        remote: remote.helperNames,
+        idOf: (p) => 'helper:$id:${p.person}',
+        updatedAtOf: (p) => p.updatedAt,
+        combine: (l, r) => newerOf(l, r, (p) => p.updatedAt),
+        tombstones: tombstones,
+      ),
       history: mergeHistory(history, remote.history),
     );
   }

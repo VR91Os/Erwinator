@@ -86,9 +86,22 @@ class Task {
   // ChecklistItem keine eigene ID, ein Item-genauer Merge ist daher nicht
   // möglich), der Verlauf wird verlustfrei aus beiden Seiten vereinigt,
   // damit kein Audit-Eintrag verschwindet, egal welche Seite "gewinnt".
-  Task mergeFrom(Task remote) {
+  //
+  // itemRefs (verknüpfte Dateien) sind reine ID-Strings ohne eigenen
+  // Zeitstempel, daher kein volles "Edit schlägt Delete" pro Eintrag
+  // möglich wie bei PresenceEntry - ein Tombstone
+  // ('itemRef:$id:$fileEntryId', siehe ProjectStore.removeTaskItemRef)
+  // blockt die Vereinigung dauerhaft. addTaskItemRef entfernt beim
+  // erneuten Verknüpfen den lokalen Tombstone, deckt also den Re-Add auf
+  // demselben Gerät ab; nur ein Re-Add auf einem ANDEREN Gerät, das den
+  // fremden Tombstone noch nicht kennt, könnte danach beim Merge erneut
+  // gefiltert werden - ein bewusst akzeptierter Rand-Fall, siehe Kommentar
+  // dort.
+  Task mergeFrom(Task remote, Map<String, DateTime> tombstones) {
     final winner = newerOf(this, remote, (t) => t.updatedAt);
-    final itemRefsUnion = {...itemRefs, ...remote.itemRefs}.toList();
+    final itemRefsUnion = {...itemRefs, ...remote.itemRefs}
+        .where((ref) => tombstones['itemRef:$id:$ref'] == null)
+        .toList();
     return Task(
       id,
       winner.name,

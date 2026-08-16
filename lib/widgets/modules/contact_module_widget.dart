@@ -127,7 +127,7 @@ class ContactModuleWidget extends StatelessWidget {
           ],
         );
       },
-    );
+    ).then((_) => nameController.dispose());
   }
 
   Future<void> _call(BuildContext context, String phone) async {
@@ -186,6 +186,7 @@ class ContactModuleWidget extends StatelessWidget {
           else
             ...module.contacts.map(
               (person) => _ContactPersonTile(
+                key: ValueKey(person.id),
                 projectId: projectId,
                 gewerkId: gewerkId,
                 module: module,
@@ -212,7 +213,7 @@ class ContactModuleWidget extends StatelessWidget {
   }
 }
 
-class _ContactPersonTile extends StatelessWidget {
+class _ContactPersonTile extends StatefulWidget {
   final String projectId;
   final String gewerkId;
   final ContactModule module;
@@ -222,6 +223,7 @@ class _ContactPersonTile extends StatelessWidget {
   final void Function(String phone) onWhatsApp;
 
   const _ContactPersonTile({
+    super.key,
     required this.projectId,
     required this.gewerkId,
     required this.module,
@@ -232,9 +234,44 @@ class _ContactPersonTile extends StatelessWidget {
   });
 
   @override
+  State<_ContactPersonTile> createState() => _ContactPersonTileState();
+}
+
+class _ContactPersonTileState extends State<_ContactPersonTile> {
+  late final _phoneController =
+      TextEditingController(text: widget.person.phone);
+
+  @override
+  void didUpdateWidget(covariant _ContactPersonTile oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    // Mit einem stabilen Key (siehe Aufrufstelle) bleibt dieses State-Objekt
+    // über Rebuilds hinweg derselben Person zugeordnet - ändert sich ihre
+    // Telefonnummer extern (z.B. Sync-Merge von einem anderen Gerät), muss
+    // das Feld trotzdem nachgezogen werden, sonst zeigt es die veraltete
+    // Nummer, obwohl der Nutzer gerade nichts eingibt.
+    if (oldWidget.person.phone != widget.person.phone &&
+        _phoneController.text != widget.person.phone) {
+      _phoneController.text = widget.person.phone;
+    }
+  }
+
+  @override
+  void dispose() {
+    _phoneController.dispose();
+    super.dispose();
+  }
+
+  @override
   Widget build(BuildContext context) {
     final store = context.read<ProjectStore>();
-    final phoneController = TextEditingController(text: person.phone);
+    final projectId = widget.projectId;
+    final gewerkId = widget.gewerkId;
+    final module = widget.module;
+    final person = widget.person;
+    final actor = widget.actor;
+    final onCall = widget.onCall;
+    final onWhatsApp = widget.onWhatsApp;
+    final phoneController = _phoneController;
     final hasPhone = person.phone.trim().isNotEmpty;
 
     return Container(

@@ -8,6 +8,9 @@ import 'audit_info_icon.dart';
 Widget taskWidget(
   Task task,
   BuildContext context, {
+  required String projectId,
+  required String gewerkId,
+  required String moduleId,
   required VoidCallback onStatusTap,
   required VoidCallback onShiftDate,
   required VoidCallback onShiftDateByDefault,
@@ -41,7 +44,12 @@ Widget taskWidget(
       Navigator.push(
         context,
         MaterialPageRoute(
-          builder: (context) => TaskDetailScreen(task: task),
+          builder: (context) => TaskDetailScreen(
+            projectId: projectId,
+            gewerkId: gewerkId,
+            moduleId: moduleId,
+            taskId: task.id,
+          ),
         ),
       );
     },

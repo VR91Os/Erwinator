@@ -2,13 +2,16 @@ import 'package:flutter/foundation.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
 import '../models/audit_entry.dart';
+import '../models/finance_entry.dart';
 import '../models/gewerk.dart';
 import '../models/helper_demand.dart';
 import '../models/image_annotation.dart';
 import '../models/modules/contact_module.dart';
 import '../models/modules/file_module.dart';
+import '../models/modules/finance_module.dart';
 import '../models/modules/gewerk_module.dart';
 import '../models/modules/todo_module.dart';
+import '../models/presence_entry.dart';
 import '../models/project.dart';
 import '../models/task.dart';
 import '../models/time_tracking.dart';
@@ -32,6 +35,17 @@ class ProjectStore extends ChangeNotifier {
   final SharingService _sharingService;
   final Map<String, RealtimeChannel> _projectSubscriptions = {};
 
+  // Serialisiert überlappende Cloud-Syncs pro geteiltem Projekt (statt sie
+  // parallel laufen zu lassen): zwei schnelle Aktionen kurz hintereinander
+  // (oder ein Sync, der noch läuft, während der nächste Edit passiert)
+  // würden sonst zwei fetch→merge→push-Zyklen gleichzeitig auf demselben
+  // Projekt ausführen und sich potenziell gegenseitig überschreiben.
+  final Map<String, Future<bool>> _syncQueue = {};
+
+  // Verhindert doppelte shared_projects-Zeilen durch Doppel-Tap auf
+  // "Teilen", solange die erste Anfrage noch läuft.
+  final Map<String, Future<String>> _shareInProgress = {};
+
   // Projekt-Teilen ist nur aktiv, wenn supabase_config.dart ausgefüllt ist –
   // sonst bleibt die App wie bisher rein lokal nutzbar.
   bool get _sharingConfigured =>
@@ -47,6 +61,9 @@ class ProjectStore extends ChangeNotifier {
       projects = await _repository.loadProjects();
     } catch (_) {
       projects = [];
+    }
+    for (final project in projects) {
+      project.pruneTombstones();
     }
     isLoading = false;
     notifyListeners();
@@ -91,12 +108,24 @@ class ProjectStore extends ChangeNotifier {
     });
   }
 
+  // Serialisiert-per-sharedId Wrapper um [_doSyncSharedProject]: siehe
+  // [_syncQueue]. _doSyncSharedProject wirft nie (fängt alle Fehler selbst
+  // ab), daher bleibt die Warteschlange auch nach einem Fehlschlag nutzbar.
+  Future<bool> _syncSharedProject(Project project) {
+    final sharedId = project.sharedId;
+    if (sharedId == null) return Future.value(false);
+    final previous = _syncQueue[sharedId] ?? Future.value(false);
+    final next = previous.then((_) => _doSyncSharedProject(project));
+    _syncQueue[sharedId] = next;
+    return next;
+  }
+
   // Holt den aktuellen Cloud-Stand, merged ihn mit der lokalen Version
   // (statt blind zu überschreiben) und schreibt das Ergebnis zurück – so
   // in beide Richtungen. Gibt false zurück (und protokolliert den Fehler),
   // wenn der Abgleich fehlschlägt, z.B. mangels Netzwerk – die lokale
   // Änderung bleibt dabei immer erhalten, nur der Cloud-Abgleich fällt aus.
-  Future<bool> _syncSharedProject(Project project) async {
+  Future<bool> _doSyncSharedProject(Project project) async {
     final sharedId = project.sharedId;
     if (sharedId == null) return false;
     try {
@@ -116,12 +145,26 @@ class ProjectStore extends ChangeNotifier {
   }
 
   Future<String> shareProject(String projectId) async {
+    final inFlight = _shareInProgress[projectId];
+    if (inFlight != null) return inFlight;
+
+    final future = _shareProject(projectId);
+    _shareInProgress[projectId] = future;
+    try {
+      return await future;
+    } finally {
+      _shareInProgress.remove(projectId);
+    }
+  }
+
+  Future<String> _shareProject(String projectId) async {
     final project = _project(projectId);
+    if (project == null) return Future.error(StateError('Projekt nicht gefunden'));
     final sharedId = await _sharingService.shareProject(project);
     project.sharedId = sharedId;
     _subscribeToProject(sharedId);
     notifyListeners();
-    await _persist();
+    await _persist(projectId);
     return sharedId;
   }
 
@@ -133,7 +176,7 @@ class ProjectStore extends ChangeNotifier {
     projects.add(project);
     if (project.sharedId != null) _subscribeToProject(project.sharedId!);
     notifyListeners();
-    await _persist();
+    await _persist(project.id);
   }
 
   @override
@@ -144,7 +187,13 @@ class ProjectStore extends ChangeNotifier {
     super.dispose();
   }
 
-  Future<void> _persist() async {
+  // [changedProjectId] beschränkt den Cloud-Sync auf das betroffene
+  // Projekt, statt bei jeder Kleinigkeit ausnahmslos alle geteilten
+  // Projekte neu abzugleichen (unnötiger Netzwerk-Traffic inkl. der
+  // Dateiinhalte aller anderen Projekte). null (z.B. bei neu/importierten
+  // Projekten ohne bekannte sharedId) synct sicherheitshalber weiterhin
+  // alle.
+  Future<void> _persist([String? changedProjectId]) async {
     try {
       await _repository.saveProjects(projects);
     } catch (e, stack) {
@@ -157,8 +206,11 @@ class ProjectStore extends ChangeNotifier {
     // Vor dem Push erst den aktuellen Cloud-Stand holen und mergen (statt
     // blind zu überschreiben) – deckt sowohl "Kollege hat parallel etwas
     // geändert" als auch "war offline, jetzt wieder online" ab.
+    final targets = changedProjectId == null
+        ? List<Project>.of(projects)
+        : projects.where((p) => p.id == changedProjectId).toList();
     var mergedAnything = false;
-    for (final project in List<Project>.of(projects)) {
+    for (final project in targets) {
       if (project.sharedId == null) continue;
       if (await _syncSharedProject(project)) mergedAnything = true;
     }
@@ -170,17 +222,47 @@ class ProjectStore extends ChangeNotifier {
     }
   }
 
-  Project _project(String projectId) =>
-      projects.firstWhere((p) => p.id == projectId);
+  // Null-sichere Lookups statt firstWhere ohne orElse: hat ein anderes
+  // Gerät das Element per Sync gerade gelöscht, während lokal eine Aktion
+  // darauf zielt, brach das vorher mit einer unbehandelten StateError ab.
+  // Jetzt bricht die jeweilige Aktion still ab (Element existiert nicht
+  // mehr, es gibt nichts zu tun).
+  Project? _project(String projectId) {
+    for (final p in projects) {
+      if (p.id == projectId) return p;
+    }
+    return null;
+  }
 
-  Gewerk _gewerk(String projectId, String gewerkId) =>
-      _project(projectId).gewerke.firstWhere((g) => g.id == gewerkId);
+  Gewerk? _gewerk(String projectId, String gewerkId) {
+    final project = _project(projectId);
+    if (project == null) return null;
+    for (final g in project.gewerke) {
+      if (g.id == gewerkId) return g;
+    }
+    return null;
+  }
 
-  GewerkModule _module(String projectId, String gewerkId, String moduleId) =>
-      _gewerk(projectId, gewerkId).modules.firstWhere((m) => m.id == moduleId);
+  GewerkModule? _module(String projectId, String gewerkId, String moduleId) {
+    final gewerk = _gewerk(projectId, gewerkId);
+    if (gewerk == null) return null;
+    for (final m in gewerk.modules) {
+      if (m.id == moduleId) return m;
+    }
+    return null;
+  }
 
-  TodoModule _todoModule(String projectId, String gewerkId, String moduleId) =>
-      _module(projectId, gewerkId, moduleId) as TodoModule;
+  TodoModule? _todoModule(String projectId, String gewerkId, String moduleId) {
+    final module = _module(projectId, gewerkId, moduleId);
+    return module is TodoModule ? module : null;
+  }
+
+  Task? _task(TodoModule module, String taskId) {
+    for (final t in module.tasks) {
+      if (t.id == taskId) return t;
+    }
+    return null;
+  }
 
   Future<void> addProject(
     String name, {
@@ -218,7 +300,7 @@ class ProjectStore extends ChangeNotifier {
   Future<void> importProject(Project project) async {
     projects.add(project);
     notifyListeners();
-    await _persist();
+    await _persist(project.id);
   }
 
   Future<void> updateExportPrefs(
@@ -227,11 +309,12 @@ class ProjectStore extends ChangeNotifier {
     required bool exportPriorityTasks,
   }) async {
     final project = _project(projectId);
+    if (project == null) return;
     project.exportAllDatedTodos = exportAllDatedTodos;
     project.exportPriorityTasks = exportPriorityTasks;
     project.updatedAt = DateTime.now();
     notifyListeners();
-    await _persist();
+    await _persist(projectId);
   }
 
   Future<void> updatePriorityWarningSettings(
@@ -240,11 +323,12 @@ class ProjectStore extends ChangeNotifier {
     required bool notifyOnPriorityWarning,
   }) async {
     final project = _project(projectId);
+    if (project == null) return;
     project.priorityWarningDays = priorityWarningDays;
     project.notifyOnPriorityWarning = notifyOnPriorityWarning;
     project.updatedAt = DateTime.now();
     notifyListeners();
-    await _persist();
+    await _persist(projectId);
   }
 
   Future<void> updateSkipPartialStatus(
@@ -252,10 +336,11 @@ class ProjectStore extends ChangeNotifier {
     required bool skipPartialStatus,
   }) async {
     final project = _project(projectId);
+    if (project == null) return;
     project.skipPartialStatus = skipPartialStatus;
     project.updatedAt = DateTime.now();
     notifyListeners();
-    await _persist();
+    await _persist(projectId);
   }
 
   Future<void> updateShiftDays(
@@ -263,10 +348,11 @@ class ProjectStore extends ChangeNotifier {
     required int shiftDays,
   }) async {
     final project = _project(projectId);
+    if (project == null) return;
     project.shiftDays = shiftDays;
     project.updatedAt = DateTime.now();
     notifyListeners();
-    await _persist();
+    await _persist(projectId);
   }
 
   Future<void> updateArchiveSettings(
@@ -275,11 +361,12 @@ class ProjectStore extends ChangeNotifier {
     required bool moveCompletedToArchiveToo,
   }) async {
     final project = _project(projectId);
+    if (project == null) return;
     project.archiveAfterDays = archiveAfterDays;
     project.moveCompletedToArchiveToo = moveCompletedToArchiveToo;
     project.updatedAt = DateTime.now();
     notifyListeners();
-    await _persist();
+    await _persist(projectId);
   }
 
   Future<void> updateDeleteArchivedSettings(
@@ -288,11 +375,12 @@ class ProjectStore extends ChangeNotifier {
     required int deleteArchivedAfterDays,
   }) async {
     final project = _project(projectId);
+    if (project == null) return;
     project.deleteArchivedTasksPermanently = deleteArchivedTasksPermanently;
     project.deleteArchivedAfterDays = deleteArchivedAfterDays;
     project.updatedAt = DateTime.now();
     notifyListeners();
-    await _persist();
+    await _persist(projectId);
   }
 
   // Entfernt archivierte (nicht erledigte) Aufgaben endgültig, sobald sie
@@ -301,7 +389,7 @@ class ProjectStore extends ChangeNotifier {
   // eines Projekts aufgerufen (siehe GewerkeScreen.initState).
   Future<void> cleanupExpiredArchivedTasks(String projectId) async {
     final project = _project(projectId);
-    if (!project.deleteArchivedTasksPermanently) return;
+    if (project == null || !project.deleteArchivedTasksPermanently) return;
     final threshold =
         project.archiveAfterDays + project.deleteArchivedAfterDays;
     var changed = false;
@@ -322,13 +410,15 @@ class ProjectStore extends ChangeNotifier {
     }
     if (!changed) return;
     notifyListeners();
-    await _persist();
+    await _persist(projectId);
   }
 
   Future<void> addGewerk(String projectId, String name) async {
-    _project(projectId).gewerke.add(Gewerk(newId(), name));
+    final project = _project(projectId);
+    if (project == null) return;
+    project.gewerke.add(Gewerk(newId(), name));
     notifyListeners();
-    await _persist();
+    await _persist(projectId);
   }
 
   Future<void> renameGewerk(
@@ -337,35 +427,44 @@ class ProjectStore extends ChangeNotifier {
     String name,
   ) async {
     final gewerk = _gewerk(projectId, gewerkId);
+    if (gewerk == null) return;
     gewerk.name = name;
     gewerk.updatedAt = DateTime.now();
     notifyListeners();
-    await _persist();
+    await _persist(projectId);
   }
 
   Future<void> removeGewerk(String projectId, String gewerkId) async {
     final project = _project(projectId);
+    if (project == null) return;
     project.gewerke.removeWhere((g) => g.id == gewerkId);
     project.deletedIds[gewerkId] = DateTime.now();
     notifyListeners();
-    await _persist();
+    await _persist(projectId);
   }
 
-  Future<void> addModule(
+  // Gibt die id des neu angelegten Moduls zurück (z.B. damit direkt danach
+  // eine Datei automatisch in ein frisch angelegtes File-Modul hochgeladen
+  // werden kann, siehe TaskDetailScreen).
+  Future<String?> addModule(
     String projectId,
     String gewerkId,
     String moduleType,
   ) async {
+    final gewerk = _gewerk(projectId, gewerkId);
+    if (gewerk == null) return null;
     final id = newId();
     final GewerkModule module = switch (moduleType) {
       ContactModule.moduleType => ContactModule(id),
       TodoModule.moduleType => TodoModule(id),
       FileModule.moduleType => FileModule(id),
+      FinanceModule.moduleType => FinanceModule(id),
       _ => throw ArgumentError('Unbekannter Modultyp: $moduleType'),
     };
-    _gewerk(projectId, gewerkId).modules.add(module);
+    gewerk.modules.add(module);
     notifyListeners();
-    await _persist();
+    await _persist(projectId);
+    return id;
   }
 
   Future<void> removeModule(
@@ -374,10 +473,12 @@ class ProjectStore extends ChangeNotifier {
     String moduleId,
   ) async {
     final project = _project(projectId);
-    _gewerk(projectId, gewerkId).modules.removeWhere((m) => m.id == moduleId);
+    final gewerk = _gewerk(projectId, gewerkId);
+    if (project == null || gewerk == null) return;
+    gewerk.modules.removeWhere((m) => m.id == moduleId);
     project.deletedIds[moduleId] = DateTime.now();
     notifyListeners();
-    await _persist();
+    await _persist(projectId);
   }
 
   Future<void> renameModule(
@@ -387,10 +488,11 @@ class ProjectStore extends ChangeNotifier {
     String label,
   ) async {
     final module = _module(projectId, gewerkId, moduleId);
+    if (module == null) return;
     module.label = label;
     module.updatedAt = DateTime.now();
     notifyListeners();
-    await _persist();
+    await _persist(projectId);
   }
 
   Future<void> addTaskToTodoModule(
@@ -399,9 +501,11 @@ class ProjectStore extends ChangeNotifier {
     String moduleId,
     Task task,
   ) async {
-    _todoModule(projectId, gewerkId, moduleId).tasks.add(task);
+    final module = _todoModule(projectId, gewerkId, moduleId);
+    if (module == null) return;
+    module.tasks.add(task);
     notifyListeners();
-    await _persist();
+    await _persist(projectId);
   }
 
   Future<void> updateTaskStatus(
@@ -412,9 +516,10 @@ class ProjectStore extends ChangeNotifier {
     required String actor,
   }) async {
     final project = _project(projectId);
-    final task = _todoModule(projectId, gewerkId, moduleId)
-        .tasks
-        .firstWhere((t) => t.id == taskId);
+    final module = _todoModule(projectId, gewerkId, moduleId);
+    if (project == null || module == null) return;
+    final task = _task(module, taskId);
+    if (task == null) return;
     if (task.status == 'offen') {
       task.status = project.skipPartialStatus ? 'erledigt' : 'teilweise';
     } else if (task.status == 'teilweise') {
@@ -430,7 +535,7 @@ class ProjectStore extends ChangeNotifier {
           : 'Status geändert: ${task.status}',
     ));
     notifyListeners();
-    await _persist();
+    await _persist(projectId);
   }
 
   Future<void> shiftTaskDueDate(
@@ -440,18 +545,16 @@ class ProjectStore extends ChangeNotifier {
     String taskId, {
     required String actor,
   }) async {
-    final task = _todoModule(projectId, gewerkId, moduleId)
-        .tasks
-        .firstWhere((t) => t.id == taskId);
-    if (task.dueDate == null) {
-      return;
-    }
+    final module = _todoModule(projectId, gewerkId, moduleId);
+    if (module == null) return;
+    final task = _task(module, taskId);
+    if (task == null || task.dueDate == null) return;
     task.dueDate = task.dueDate!.add(const Duration(days: 1));
     task.updatedAt = DateTime.now();
     task.history
         .add(AuditEntry(kurzzeichen: actor, action: 'Fälligkeit verschoben'));
     notifyListeners();
-    await _persist();
+    await _persist(projectId);
   }
 
   // Verschiebt um die in den Projekt-Optionen eingestellte Anzahl Tage
@@ -466,12 +569,10 @@ class ProjectStore extends ChangeNotifier {
     required String actor,
   }) async {
     final project = _project(projectId);
-    final task = _todoModule(projectId, gewerkId, moduleId)
-        .tasks
-        .firstWhere((t) => t.id == taskId);
-    if (task.dueDate == null) {
-      return;
-    }
+    final module = _todoModule(projectId, gewerkId, moduleId);
+    if (project == null || module == null) return;
+    final task = _task(module, taskId);
+    if (task == null || task.dueDate == null) return;
     final shifted =
         task.dueDate!.add(Duration(days: project.shiftDays));
     task.dueDate = nextWorkday(shifted, holidayCountry);
@@ -481,7 +582,7 @@ class ProjectStore extends ChangeNotifier {
       action: 'Fälligkeit um ${project.shiftDays} Tage verschoben',
     ));
     notifyListeners();
-    await _persist();
+    await _persist(projectId);
   }
 
   Future<void> archiveTask(
@@ -491,14 +592,182 @@ class ProjectStore extends ChangeNotifier {
     String taskId, {
     required String actor,
   }) async {
-    final task = _todoModule(projectId, gewerkId, moduleId)
-        .tasks
-        .firstWhere((t) => t.id == taskId);
+    final module = _todoModule(projectId, gewerkId, moduleId);
+    if (module == null) return;
+    final task = _task(module, taskId);
+    if (task == null) return;
     task.status = 'archiviert';
     task.updatedAt = DateTime.now();
     task.history.add(AuditEntry(kurzzeichen: actor, action: 'archiviert'));
     notifyListeners();
-    await _persist();
+    await _persist(projectId);
+  }
+
+  Future<void> renameTask(
+    String projectId,
+    String gewerkId,
+    String moduleId,
+    String taskId, {
+    required String name,
+    required String actor,
+  }) async {
+    final module = _todoModule(projectId, gewerkId, moduleId);
+    if (module == null) return;
+    final task = _task(module, taskId);
+    if (task == null || name.trim().isEmpty) return;
+    task.name = name.trim();
+    task.updatedAt = DateTime.now();
+    task.history.add(AuditEntry(kurzzeichen: actor, action: 'umbenannt'));
+    notifyListeners();
+    await _persist(projectId);
+  }
+
+  Future<void> updateTaskDescription(
+    String projectId,
+    String gewerkId,
+    String moduleId,
+    String taskId, {
+    required String description,
+    required String actor,
+  }) async {
+    final module = _todoModule(projectId, gewerkId, moduleId);
+    if (module == null) return;
+    final task = _task(module, taskId);
+    if (task == null) return;
+    task.description = description.trim();
+    task.updatedAt = DateTime.now();
+    task.history
+        .add(AuditEntry(kurzzeichen: actor, action: 'Beschreibung geändert'));
+    notifyListeners();
+    await _persist(projectId);
+  }
+
+  Future<void> setTaskHighPriority(
+    String projectId,
+    String gewerkId,
+    String moduleId,
+    String taskId, {
+    required bool isHighPriority,
+    required String actor,
+  }) async {
+    final module = _todoModule(projectId, gewerkId, moduleId);
+    if (module == null) return;
+    final task = _task(module, taskId);
+    if (task == null) return;
+    task.isHighPriority = isHighPriority;
+    task.updatedAt = DateTime.now();
+    task.history.add(AuditEntry(
+      kurzzeichen: actor,
+      action: isHighPriority ? 'als Prio markiert' : 'Prio entfernt',
+    ));
+    notifyListeners();
+    await _persist(projectId);
+  }
+
+  // dueDate: null entfernt die Fälligkeit. Direktes Setzen (im Unterschied
+  // zu shiftTaskDueDate/-ByDefault, die relativ zum bisherigen Datum
+  // verschieben) für die Bearbeitung im Aufgaben-Detail.
+  Future<void> setTaskDueDate(
+    String projectId,
+    String gewerkId,
+    String moduleId,
+    String taskId, {
+    required DateTime? dueDate,
+    required String actor,
+  }) async {
+    final module = _todoModule(projectId, gewerkId, moduleId);
+    if (module == null) return;
+    final task = _task(module, taskId);
+    if (task == null) return;
+    task.dueDate = dueDate;
+    task.updatedAt = DateTime.now();
+    task.history.add(AuditEntry(
+      kurzzeichen: actor,
+      action: dueDate == null ? 'Fälligkeit entfernt' : 'Fälligkeit gesetzt',
+    ));
+    notifyListeners();
+    await _persist(projectId);
+  }
+
+  // Direktes Setzen eines Status (im Unterschied zu updateTaskStatus, das
+  // offen -> teilweise -> erledigt -> offen durchschaltet) für die Auswahl
+  // im Aufgaben-Detail.
+  Future<void> setTaskStatusDirect(
+    String projectId,
+    String gewerkId,
+    String moduleId,
+    String taskId, {
+    required String status,
+    required String actor,
+  }) async {
+    final module = _todoModule(projectId, gewerkId, moduleId);
+    if (module == null) return;
+    final task = _task(module, taskId);
+    if (task == null || task.status == status) return;
+    task.status = status;
+    task.updatedAt = DateTime.now();
+    task.history
+        .add(AuditEntry(kurzzeichen: actor, action: 'Status geändert: $status'));
+    notifyListeners();
+    await _persist(projectId);
+  }
+
+  // Verknüpft eine bereits im Projekt vorhandene Datei (aus einem
+  // beliebigen Gewerk) mit der Aufgabe, ohne sie ein zweites Mal
+  // abzulegen - itemRefs speichert nur die (app-weit eindeutige)
+  // fileEntryId. Set-Semantik über mergeFrom (siehe task.dart) macht das
+  // beim Sync konfliktfrei, auch wenn zwei Geräte gleichzeitig
+  // unterschiedliche Dateien verknüpfen.
+  Future<void> addTaskItemRef(
+    String projectId,
+    String gewerkId,
+    String moduleId,
+    String taskId,
+    String fileEntryId, {
+    required String actor,
+  }) async {
+    final project = _project(projectId);
+    final module = _todoModule(projectId, gewerkId, moduleId);
+    if (project == null || module == null) return;
+    final task = _task(module, taskId);
+    if (task == null || task.itemRefs.contains(fileEntryId)) return;
+    task.itemRefs.add(fileEntryId);
+    // Löscht einen eventuell noch bestehenden lokalen Tombstone dieser
+    // Verknüpfung (siehe Task.mergeFrom) - sonst würde ein erneutes
+    // Verknüpfen derselben Datei nach vorherigem Entfernen beim nächsten
+    // Merge sofort wieder herausgefiltert.
+    project.deletedIds.remove('itemRef:$taskId:$fileEntryId');
+    task.updatedAt = DateTime.now();
+    task.history
+        .add(AuditEntry(kurzzeichen: actor, action: 'Datei verknüpft'));
+    notifyListeners();
+    await _persist(projectId);
+  }
+
+  Future<void> removeTaskItemRef(
+    String projectId,
+    String gewerkId,
+    String moduleId,
+    String taskId,
+    String fileEntryId, {
+    required String actor,
+  }) async {
+    final project = _project(projectId);
+    final module = _todoModule(projectId, gewerkId, moduleId);
+    if (project == null || module == null) return;
+    final task = _task(module, taskId);
+    if (task == null) return;
+    task.itemRefs.remove(fileEntryId);
+    // Tombstone, sonst würde ein Gerät, das die Aufgabe unverändert (mit
+    // der alten Verknüpfung) hält, sie beim nächsten Sync-Merge einfach
+    // wiederherstellen (Task.mergeFrom vereinigt itemRefs sonst als reine
+    // Menge ohne Löschung zu berücksichtigen).
+    project.deletedIds['itemRef:$taskId:$fileEntryId'] = DateTime.now();
+    task.updatedAt = DateTime.now();
+    task.history
+        .add(AuditEntry(kurzzeichen: actor, action: 'Datei-Verknüpfung entfernt'));
+    notifyListeners();
+    await _persist(projectId);
   }
 
   Future<void> addContactPerson(
@@ -509,12 +778,13 @@ class ProjectStore extends ChangeNotifier {
     String phone = '',
     required String actor,
   }) async {
-    final module = _module(projectId, gewerkId, moduleId) as ContactModule;
+    final module = _module(projectId, gewerkId, moduleId);
+    if (module is! ContactModule) return;
     module.contacts.add(ContactPerson(id: newId(), name: name, phone: phone));
     module.history
         .add(AuditEntry(kurzzeichen: actor, action: 'Person hinzugefügt'));
     notifyListeners();
-    await _persist();
+    await _persist(projectId);
   }
 
   Future<void> updateContactPerson(
@@ -526,14 +796,19 @@ class ProjectStore extends ChangeNotifier {
     required String phone,
     required String actor,
   }) async {
-    final module = _module(projectId, gewerkId, moduleId) as ContactModule;
-    final person = module.contacts.firstWhere((c) => c.id == personId);
+    final module = _module(projectId, gewerkId, moduleId);
+    if (module is! ContactModule) return;
+    ContactPerson? person;
+    for (final c in module.contacts) {
+      if (c.id == personId) person = c;
+    }
+    if (person == null) return;
     person.name = name;
     person.phone = phone;
     person.updatedAt = DateTime.now();
     module.history.add(AuditEntry(kurzzeichen: actor, action: 'bearbeitet'));
     notifyListeners();
-    await _persist();
+    await _persist(projectId);
   }
 
   Future<void> removeContactPerson(
@@ -544,13 +819,14 @@ class ProjectStore extends ChangeNotifier {
     required String actor,
   }) async {
     final project = _project(projectId);
-    final module = _module(projectId, gewerkId, moduleId) as ContactModule;
+    final module = _module(projectId, gewerkId, moduleId);
+    if (project == null || module is! ContactModule) return;
     module.contacts.removeWhere((c) => c.id == personId);
     project.deletedIds[personId] = DateTime.now();
     module.history
         .add(AuditEntry(kurzzeichen: actor, action: 'Person entfernt'));
     notifyListeners();
-    await _persist();
+    await _persist(projectId);
   }
 
   Future<void> addFileEntry(
@@ -559,10 +835,11 @@ class ProjectStore extends ChangeNotifier {
     String moduleId,
     FileEntry entry,
   ) async {
-    final module = _module(projectId, gewerkId, moduleId) as FileModule;
+    final module = _module(projectId, gewerkId, moduleId);
+    if (module is! FileModule) return;
     module.entries.add(entry);
     notifyListeners();
-    await _persist();
+    await _persist(projectId);
   }
 
   Future<void> addFileVersion(
@@ -573,8 +850,13 @@ class ProjectStore extends ChangeNotifier {
     FileVersion version, {
     required String actor,
   }) async {
-    final module = _module(projectId, gewerkId, moduleId) as FileModule;
-    final entry = module.entries.firstWhere((e) => e.id == entryId);
+    final module = _module(projectId, gewerkId, moduleId);
+    if (module is! FileModule) return;
+    FileEntry? entry;
+    for (final e in module.entries) {
+      if (e.id == entryId) entry = e;
+    }
+    if (entry == null) return;
     entry.versions.add(version);
     entry.updatedAt = DateTime.now();
     entry.history.add(AuditEntry(
@@ -582,7 +864,7 @@ class ProjectStore extends ChangeNotifier {
       action: 'neue Version hochgeladen (${version.label})',
     ));
     notifyListeners();
-    await _persist();
+    await _persist(projectId);
   }
 
   Future<void> addImageAnnotation(
@@ -592,11 +874,16 @@ class ProjectStore extends ChangeNotifier {
     String entryId,
     ImageAnnotation annotation,
   ) async {
-    final module = _module(projectId, gewerkId, moduleId) as FileModule;
-    final entry = module.entries.firstWhere((e) => e.id == entryId);
+    final module = _module(projectId, gewerkId, moduleId);
+    if (module is! FileModule) return;
+    FileEntry? entry;
+    for (final e in module.entries) {
+      if (e.id == entryId) entry = e;
+    }
+    if (entry == null) return;
     entry.annotations.add(annotation);
     notifyListeners();
-    await _persist();
+    await _persist(projectId);
   }
 
   Future<void> removeImageAnnotation(
@@ -607,12 +894,17 @@ class ProjectStore extends ChangeNotifier {
     String annotationId,
   ) async {
     final project = _project(projectId);
-    final module = _module(projectId, gewerkId, moduleId) as FileModule;
-    final entry = module.entries.firstWhere((e) => e.id == entryId);
+    final module = _module(projectId, gewerkId, moduleId);
+    if (project == null || module is! FileModule) return;
+    FileEntry? entry;
+    for (final e in module.entries) {
+      if (e.id == entryId) entry = e;
+    }
+    if (entry == null) return;
     entry.annotations.removeWhere((a) => a.id == annotationId);
     project.deletedIds[annotationId] = DateTime.now();
     notifyListeners();
-    await _persist();
+    await _persist(projectId);
   }
 
   DateTime _dateOnly(DateTime date) =>
@@ -632,39 +924,45 @@ class ProjectStore extends ChangeNotifier {
     required String actor,
   }) async {
     final project = _project(projectId);
+    if (project == null) return;
     final start = _dateOnly(from);
     final end = _dateOnly(to);
+    final byDate = <DateTime, HelperDemand>{
+      for (final d in project.helperDemands) _dateOnly(d.date): d,
+    };
     for (var day = start;
         !day.isAfter(end);
         day = day.add(const Duration(days: 1))) {
-      final existing =
-          project.helperDemands.where((d) => d.date.isAtSameMomentAs(day));
       final entry = AuditEntry(kurzzeichen: actor, action: 'Bedarf eingetragen');
-      if (existing.isNotEmpty) {
-        existing.first.neededCount = neededCount;
-        existing.first.note = note;
-        existing.first.updatedAt = DateTime.now();
-        existing.first.history.add(entry);
+      final existing = byDate[day];
+      if (existing != null) {
+        existing.neededCount = neededCount;
+        existing.note = note;
+        existing.updatedAt = DateTime.now();
+        existing.history.add(entry);
       } else {
-        project.helperDemands.add(HelperDemand(
+        final demand = HelperDemand(
           id: newId(),
           date: day,
           neededCount: neededCount,
           note: note,
           history: [entry],
-        ));
+        );
+        project.helperDemands.add(demand);
+        byDate[day] = demand;
       }
     }
     notifyListeners();
-    await _persist();
+    await _persist(projectId);
   }
 
   Future<void> removeHelperDemand(String projectId, String demandId) async {
     final project = _project(projectId);
+    if (project == null) return;
     project.helperDemands.removeWhere((d) => d.id == demandId);
     project.deletedIds[demandId] = DateTime.now();
     notifyListeners();
-    await _persist();
+    await _persist(projectId);
   }
 
   // Trägt einen Helfer für jeden Tag im Zeitraum [from, to] ein. Tage ohne
@@ -680,19 +978,23 @@ class ProjectStore extends ChangeNotifier {
     required String actor,
   }) async {
     final project = _project(projectId);
+    if (project == null) return;
     final start = _dateOnly(from);
     final end = _dateOnly(to);
+    final demandsByDate = <DateTime, HelperDemand>{
+      for (final d in project.helperDemands) _dateOnly(d.date): d,
+    };
     for (var day = start;
         !day.isAfter(end);
         day = day.add(const Duration(days: 1))) {
-      final existing =
-          project.helperDemands.where((d) => d.date.isAtSameMomentAs(day));
       final HelperDemand demand;
-      if (existing.isNotEmpty) {
-        demand = existing.first;
+      final existing = demandsByDate[day];
+      if (existing != null) {
+        demand = existing;
       } else {
         demand = HelperDemand(id: newId(), date: day, neededCount: 1);
         project.helperDemands.add(demand);
+        demandsByDate[day] = demand;
       }
       demand.signups.add(HelperSignup(
         id: newId(),
@@ -706,7 +1008,7 @@ class ProjectStore extends ChangeNotifier {
       _syncHelperIntoTimeTracking(project, day, name, actor);
     }
     notifyListeners();
-    await _persist();
+    await _persist(projectId);
   }
 
   // Ist an [day] laut aktivem Arbeitszeitprofil ein Arbeitstag, wird der
@@ -721,14 +1023,15 @@ class ProjectStore extends ChangeNotifier {
   ) {
     final schedule = project.activeWorkTimeProfile?.scheduleFor(day.weekday);
     if (schedule == null) return;
-    final existing =
-        project.workDayEntries.where((e) => e.date.isAtSameMomentAs(day));
-    if (existing.isNotEmpty) {
-      final entry = existing.first;
+    WorkDayEntry? entry;
+    for (final e in project.workDayEntries) {
+      if (e.date.isAtSameMomentAs(day)) entry = e;
+    }
+    if (entry != null) {
       entry.hours = schedule.hours;
       entry.updatedAt = DateTime.now();
-      if (!entry.helperNames.contains(helperName)) {
-        entry.helperNames.add(helperName);
+      if (!entry.helperNames.any((p) => p.person == helperName)) {
+        entry.helperNames.add(PresenceEntry(helperName));
       }
       entry.history.add(AuditEntry(
         kurzzeichen: actor,
@@ -739,7 +1042,7 @@ class ProjectStore extends ChangeNotifier {
         id: newId(),
         date: day,
         hours: schedule.hours,
-        helperNames: [helperName],
+        helperNames: [PresenceEntry(helperName)],
         history: [
           AuditEntry(
             kurzzeichen: actor,
@@ -757,21 +1060,34 @@ class ProjectStore extends ChangeNotifier {
     String signupId,
   ) async {
     final project = _project(projectId);
-    final demand = project.helperDemands.firstWhere((d) => d.id == demandId);
+    if (project == null) return;
+    HelperDemand? demand;
+    for (final d in project.helperDemands) {
+      if (d.id == demandId) demand = d;
+    }
+    if (demand == null) return;
     final removedSignups =
         demand.signups.where((s) => s.id == signupId).toList();
     demand.signups.removeWhere((s) => s.id == signupId);
     project.deletedIds[signupId] = DateTime.now();
+    final day = _dateOnly(demand.date);
     for (final signup in removedSignups) {
-      final day = _dateOnly(demand.date);
-      final entries =
-          project.workDayEntries.where((e) => e.date.isAtSameMomentAs(day));
-      if (entries.isNotEmpty) {
-        entries.first.helperNames.remove(signup.name);
+      WorkDayEntry? dayEntry;
+      for (final e in project.workDayEntries) {
+        if (e.date.isAtSameMomentAs(day)) dayEntry = e;
       }
+      if (dayEntry == null) continue;
+      dayEntry.helperNames.removeWhere((p) => p.person == signup.name);
+      // Tombstone + frischer Zeitstempel, sonst würde ein späterer Merge
+      // (z.B. wenn ein anderes Gerät zwischenzeitlich nur die Stunden
+      // dieses Tages geändert hat) den entfernten Helfer aus der älteren
+      // Kopie wiederherstellen.
+      project.deletedIds['helper:${dayEntry.id}:${signup.name}'] =
+          DateTime.now();
+      dayEntry.updatedAt = DateTime.now();
     }
     notifyListeners();
-    await _persist();
+    await _persist(projectId);
   }
 
   Future<void> updateTimeTrackingEnabled(
@@ -779,10 +1095,11 @@ class ProjectStore extends ChangeNotifier {
     required bool enabled,
   }) async {
     final project = _project(projectId);
+    if (project == null) return;
     project.timeTrackingEnabled = enabled;
     project.updatedAt = DateTime.now();
     notifyListeners();
-    await _persist();
+    await _persist(projectId);
   }
 
   // Schalter "Ich bin auf der Baustelle" (V1): bleibt aktiv, bis er wieder
@@ -793,16 +1110,24 @@ class ProjectStore extends ChangeNotifier {
     required bool present,
   }) async {
     final project = _project(projectId);
+    if (project == null) return;
     if (present) {
-      if (!project.onSitePresence.contains(person)) {
-        project.onSitePresence.add(person);
+      PresenceEntry? existing;
+      for (final e in project.onSitePresence) {
+        if (e.person == person) existing = e;
+      }
+      if (existing == null) {
+        project.onSitePresence.add(PresenceEntry(person));
+      } else {
+        existing.updatedAt = DateTime.now();
       }
     } else {
-      project.onSitePresence.remove(person);
+      project.onSitePresence.removeWhere((e) => e.person == person);
+      project.deletedIds['presence:$person'] = DateTime.now();
     }
     project.updatedAt = DateTime.now();
     notifyListeners();
-    await _persist();
+    await _persist(projectId);
     // Sofort für heute nachziehen, statt erst beim nächsten App-Start.
     await syncOnSitePresenceForToday(projectId, actor: person);
   }
@@ -816,17 +1141,17 @@ class ProjectStore extends ChangeNotifier {
     required String actor,
   }) async {
     final project = _project(projectId);
-    if (project.onSitePresence.isEmpty) return;
+    if (project == null || project.onSitePresence.isEmpty) return;
     final today = _dateOnly(DateTime.now());
     final schedule = project.activeWorkTimeProfile?.scheduleFor(today.weekday);
     if (schedule == null) return;
 
-    final existing =
-        project.workDayEntries.where((e) => e.date.isAtSameMomentAs(today));
-    final WorkDayEntry entry;
+    WorkDayEntry? entry;
+    for (final e in project.workDayEntries) {
+      if (e.date.isAtSameMomentAs(today)) entry = e;
+    }
     var changed = false;
-    if (existing.isNotEmpty) {
-      entry = existing.first;
+    if (entry != null) {
       if (entry.hours != schedule.hours) {
         entry.hours = schedule.hours;
         entry.updatedAt = DateTime.now();
@@ -837,9 +1162,9 @@ class ProjectStore extends ChangeNotifier {
       project.workDayEntries.add(entry);
       changed = true;
     }
-    for (final person in project.onSitePresence) {
-      if (!entry.helperNames.contains(person)) {
-        entry.helperNames.add(person);
+    for (final presence in project.onSitePresence) {
+      if (!entry.helperNames.any((p) => p.person == presence.person)) {
+        entry.helperNames.add(PresenceEntry(presence.person));
         changed = true;
       }
     }
@@ -848,7 +1173,7 @@ class ProjectStore extends ChangeNotifier {
     entry.history
         .add(AuditEntry(kurzzeichen: actor, action: 'Anwesenheit synchronisiert'));
     notifyListeners();
-    await _persist();
+    await _persist(projectId);
   }
 
   Future<void> updateExtendedTimeCalendar(
@@ -856,19 +1181,22 @@ class ProjectStore extends ChangeNotifier {
     required bool enabled,
   }) async {
     final project = _project(projectId);
+    if (project == null) return;
     project.extendedTimeCalendar = enabled;
     project.updatedAt = DateTime.now();
     notifyListeners();
-    await _persist();
+    await _persist(projectId);
   }
 
   Future<void> addWorkTimeProfile(
     String projectId,
     WorkTimeProfile profile,
   ) async {
-    _project(projectId).workTimeProfiles.add(profile);
+    final project = _project(projectId);
+    if (project == null) return;
+    project.workTimeProfiles.add(profile);
     notifyListeners();
-    await _persist();
+    await _persist(projectId);
   }
 
   // Ersetzt ein bestehendes Profil (gleiche id) durch [profile].
@@ -876,12 +1204,14 @@ class ProjectStore extends ChangeNotifier {
     String projectId,
     WorkTimeProfile profile,
   ) async {
-    final profiles = _project(projectId).workTimeProfiles;
+    final project = _project(projectId);
+    if (project == null) return;
+    final profiles = project.workTimeProfiles;
     final index = profiles.indexWhere((p) => p.id == profile.id);
     if (index == -1) return;
     profiles[index] = profile;
     notifyListeners();
-    await _persist();
+    await _persist(projectId);
   }
 
   Future<void> removeWorkTimeProfile(
@@ -889,6 +1219,7 @@ class ProjectStore extends ChangeNotifier {
     String profileId,
   ) async {
     final project = _project(projectId);
+    if (project == null) return;
     project.workTimeProfiles.removeWhere((p) => p.id == profileId);
     project.deletedIds[profileId] = DateTime.now();
     if (project.activeWorkTimeProfileId == profileId) {
@@ -896,7 +1227,7 @@ class ProjectStore extends ChangeNotifier {
     }
     project.updatedAt = DateTime.now();
     notifyListeners();
-    await _persist();
+    await _persist(projectId);
   }
 
   // Genau ein Profil kann gleichzeitig aktiv sein (Radiobox in den
@@ -906,10 +1237,11 @@ class ProjectStore extends ChangeNotifier {
     required String? profileId,
   }) async {
     final project = _project(projectId);
+    if (project == null) return;
     project.activeWorkTimeProfileId = profileId;
     project.updatedAt = DateTime.now();
     notifyListeners();
-    await _persist();
+    await _persist(projectId);
   }
 
   // Wendet ein Arbeitszeitprofil auf jeden Tag im Zeitraum [from, to] an:
@@ -924,36 +1256,81 @@ class ProjectStore extends ChangeNotifier {
     required String actor,
   }) async {
     final project = _project(projectId);
+    if (project == null) return;
     final start = _dateOnly(from);
     final end = _dateOnly(to);
+    final byDate = <DateTime, WorkDayEntry>{
+      for (final e in project.workDayEntries) _dateOnly(e.date): e,
+    };
     for (var day = start;
         !day.isAfter(end);
         day = day.add(const Duration(days: 1))) {
       final schedule = profile.scheduleFor(day.weekday);
       if (schedule == null) continue;
-      final entry = AuditEntry(
+      final auditEntry = AuditEntry(
         kurzzeichen: actor,
         action: 'Profil "${profile.name}" angewendet',
       );
-      final existing =
-          project.workDayEntries.where((e) => e.date.isAtSameMomentAs(day));
-      if (existing.isNotEmpty) {
-        existing.first.hours = schedule.hours;
-        existing.first.updatedAt = DateTime.now();
-        existing.first.history.add(entry);
+      final existing = byDate[day];
+      if (existing != null) {
+        existing.hours = schedule.hours;
+        existing.updatedAt = DateTime.now();
+        existing.history.add(auditEntry);
       } else {
-        project.workDayEntries.add(WorkDayEntry(
+        final entry = WorkDayEntry(
           id: newId(),
           date: day,
           hours: schedule.hours,
-          history: [entry],
-        ));
+          history: [auditEntry],
+        );
+        project.workDayEntries.add(entry);
+        byDate[day] = entry;
       }
     }
     notifyListeners();
-    await _persist();
+    await _persist(projectId);
   }
 
   // Legt einen Arbeitstag manuell an oder überschreibt einen bestehenden
   // (z.B. um einen aus einem Profil erzeugten Tag im Kalender nachzujustieren).
+
+  Future<void> updateFinanceEnabled(
+    String projectId, {
+    required bool enabled,
+  }) async {
+    final project = _project(projectId);
+    if (project == null) return;
+    project.financeEnabled = enabled;
+    project.updatedAt = DateTime.now();
+    notifyListeners();
+    await _persist(projectId);
+  }
+
+  Future<void> addFinanceEntry(String projectId, FinanceEntry entry) async {
+    final project = _project(projectId);
+    if (project == null) return;
+    project.financeEntries.add(entry);
+    notifyListeners();
+    await _persist(projectId);
+  }
+
+  // Ersetzt einen bestehenden Eintrag (gleiche id) durch [entry].
+  Future<void> updateFinanceEntry(String projectId, FinanceEntry entry) async {
+    final project = _project(projectId);
+    if (project == null) return;
+    final index = project.financeEntries.indexWhere((e) => e.id == entry.id);
+    if (index == -1) return;
+    project.financeEntries[index] = entry;
+    notifyListeners();
+    await _persist(projectId);
+  }
+
+  Future<void> removeFinanceEntry(String projectId, String entryId) async {
+    final project = _project(projectId);
+    if (project == null) return;
+    project.financeEntries.removeWhere((e) => e.id == entryId);
+    project.deletedIds[entryId] = DateTime.now();
+    notifyListeners();
+    await _persist(projectId);
+  }
 }

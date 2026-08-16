@@ -52,7 +52,19 @@ create policy "owner full access" on shared_projects
   for all using (owner_id = auth.uid()) with check (owner_id = auth.uid());
 
 create policy "members read/write" on shared_projects
-  for all using (is_approved_member(id));
+  for all using (is_approved_member(id))
+  with check (is_approved_member(id));
+
+-- Postgres RLS "with check" sieht nur die NEUE Zeile, nicht die alte - ein
+-- Vergleich wie "owner_id = shared_projects.owner_id" wäre eine Tautologie
+-- (vergleicht die neue Spalte mit sich selbst) und würde eine Übernahme des
+-- Projekts durch ein einfaches Mitglied per UPDATE owner_id NICHT
+-- verhindern. Stattdessen die Spalte owner_id per Spalten-Rechten komplett
+-- vor UPDATE schützen: die App aktualisiert ohnehin nur data/updated_at
+-- (siehe sharing_service.dart pushUpdate), owner_id ändert sich nach dem
+-- Anlegen nie.
+revoke update on shared_projects from authenticated;
+grant update (data, updated_at) on shared_projects to authenticated;
 
 create policy "anyone can request to join" on project_members
   for insert with check (user_id = auth.uid());

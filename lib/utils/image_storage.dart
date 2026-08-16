@@ -13,6 +13,20 @@ Future<String> copyImageToLocalStorage(String sourcePath, String entryId) async 
   if (!await photosDir.exists()) {
     await photosDir.create(recursive: true);
   }
+
+  // Frühere Kopien mit anderer Dateiendung (z.B. vorheriges Foto war .png,
+  // dieses ist .jpg) erst entfernen, sonst sammeln sich verwaiste Dateien
+  // im App-Speicher an, die nie wieder referenziert werden.
+  if (await photosDir.exists()) {
+    await for (final entity in photosDir.list()) {
+      if (entity is! File) continue;
+      final base = entity.uri.pathSegments.last;
+      if (base.startsWith('$entryId.')) {
+        await entity.delete();
+      }
+    }
+  }
+
   final dot = sourcePath.lastIndexOf('.');
   final ext = dot == -1 ? 'jpg' : sourcePath.substring(dot + 1);
   final destPath = '${photosDir.path}/$entryId.$ext';

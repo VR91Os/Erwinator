@@ -100,7 +100,7 @@ class _PhotoAnnotationScreenState extends State<PhotoAnnotationScreen> {
           ],
         );
       },
-    );
+    ).then((_) => controller.dispose());
   }
 
   void _showMeasurementDialog(Offset start, Offset end) {
@@ -151,7 +151,7 @@ class _PhotoAnnotationScreenState extends State<PhotoAnnotationScreen> {
           ],
         );
       },
-    );
+    ).then((_) => controller.dispose());
   }
 
   void _showAnnotationDetail(ImageAnnotation annotation) {

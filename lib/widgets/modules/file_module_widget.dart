@@ -7,52 +7,22 @@ import 'package:provider/provider.dart';
 
 import '../../models/audit_entry.dart';
 import '../../models/documentation_entry.dart';
+import '../../models/finance_entry.dart';
 import '../../models/modules/file_module.dart';
+import '../../models/project.dart';
 import '../../screens/photo_annotation_screen.dart';
 import '../../state/documentation_store.dart';
 import '../../state/project_store.dart';
 import '../../state/settings_store.dart';
 import '../../utils/file_export.dart';
+import '../../utils/file_type_utils.dart';
+import '../../utils/finance_detection.dart';
 import '../../utils/id_generator.dart';
 import '../../utils/image_storage.dart';
+import '../../utils/large_file_confirm.dart';
 import '../audit_info_icon.dart';
+import '../dialogs/finance_entry_dialog.dart';
 import 'module_card.dart';
-
-const _photoExtensions = {'jpg', 'jpeg', 'png', 'gif', 'webp', 'heic', 'bmp'};
-const _videoExtensions = {'mp4', 'mov', 'avi', 'mkv', 'webm', 'm4v'};
-
-// Ab dieser Größe wird vor dem Speichern gewarnt, da der Dateiinhalt mit
-// den Projektdaten synchronisiert wird und große Dateien (v.a. Videos)
-// Speicherplatz und Sync-Geschwindigkeit spürbar beeinträchtigen können.
-const _largeFileWarningBytes = 15 * 1024 * 1024;
-
-Future<bool> _confirmLargeFile(BuildContext context, int byteSize) async {
-  if (byteSize <= _largeFileWarningBytes) return true;
-  final mb = (byteSize / (1024 * 1024)).toStringAsFixed(1);
-  final confirmed = await showDialog<bool>(
-    context: context,
-    builder: (dialogContext) => AlertDialog(
-      title: const Text("Große Datei"),
-      content: Text(
-        "Diese Datei ist $mb MB groß. Sie wird mit den Projektdaten "
-        "synchronisiert und kann Speicherplatz sowie Sync-Geschwindigkeit "
-        "für alle Projekt-Mitglieder spürbar beeinträchtigen. Trotzdem "
-        "hochladen?",
-      ),
-      actions: [
-        TextButton(
-          onPressed: () => Navigator.pop(dialogContext, false),
-          child: const Text("Abbrechen"),
-        ),
-        ElevatedButton(
-          onPressed: () => Navigator.pop(dialogContext, true),
-          child: const Text("Trotzdem hochladen"),
-        ),
-      ],
-    ),
-  );
-  return confirmed ?? false;
-}
 
 class FileModuleWidget extends StatelessWidget {
   final String projectId;
@@ -65,50 +35,6 @@ class FileModuleWidget extends StatelessWidget {
     required this.gewerkId,
     required this.module,
   });
-
-  IconData _iconFor(String fileType) {
-    switch (fileType) {
-      case 'pdf':
-        return Icons.picture_as_pdf;
-      case 'photo':
-        return Icons.image;
-      case 'video':
-        return Icons.videocam;
-      default:
-        return Icons.insert_drive_file;
-    }
-  }
-
-  String _typeLabel(String fileType) {
-    switch (fileType) {
-      case 'pdf':
-        return 'PDF';
-      case 'photo':
-        return 'Foto';
-      case 'video':
-        return 'Video';
-      default:
-        return 'Dokument';
-    }
-  }
-
-  String _extensionOf(String fileName) {
-    final dot = fileName.lastIndexOf('.');
-    return dot == -1 ? '' : fileName.substring(dot + 1).toLowerCase();
-  }
-
-  // Erkennt den Dateityp automatisch anhand der Dateiendung.
-  String _detectFileType(String extension) {
-    if (extension == 'pdf') return 'pdf';
-    if (_photoExtensions.contains(extension)) return 'photo';
-    if (_videoExtensions.contains(extension)) return 'video';
-    return 'document';
-  }
-
-  String _nameWithoutExtension(String fileName) {
-    final dot = fileName.lastIndexOf('.');
-    return dot == -1 ? fileName : fileName.substring(0, dot);
-  }
 
   // Versionen sind strikt durchnummeriert (1.0, 1.1, 1.2, …), damit auf
   // einen Blick klar ist, welche die neueste ist.
@@ -156,6 +82,9 @@ class FileModuleWidget extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final store = context.watch<ProjectStore>();
+    final project = store.projects.firstWhere((p) => p.id == projectId);
+
     return ModuleCard(
       projectId: projectId,
       gewerkId: gewerkId,
@@ -168,12 +97,15 @@ class FileModuleWidget extends StatelessWidget {
         children: [
           ...module.entries.map((entry) {
             final isPhoto = entry.fileType == 'photo';
+            final isPdf = entry.fileType == 'pdf';
+            final linkedFinanceEntry =
+                isPdf ? _existingFinanceEntryFor(project, entry.id) : null;
             final content = Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 Row(
                   children: [
-                    Icon(_iconFor(entry.fileType), size: 18),
+                    Icon(fileTypeIcon(entry.fileType), size: 18),
                     const SizedBox(width: 6),
                     Expanded(
                       child: Text(
@@ -183,6 +115,23 @@ class FileModuleWidget extends StatelessWidget {
                       ),
                     ),
                     AuditInfoIcon(history: entry.history),
+                    if (isPdf && project.financeEnabled)
+                      IconButton(
+                        icon: Icon(
+                          linkedFinanceEntry == null
+                              ? Icons.euro_symbol_outlined
+                              : Icons.euro_symbol,
+                          size: 18,
+                          color: linkedFinanceEntry == null
+                              ? null
+                              : Colors.green.shade700,
+                        ),
+                        tooltip: linkedFinanceEntry == null
+                            ? "Als Angebot/Rechnung erfassen"
+                            : "Angebot/Rechnung bearbeiten",
+                        onPressed: () =>
+                            _showFinanceEntryForFile(context, entry),
+                      ),
                     IconButton(
                       icon: const Icon(Icons.download_outlined, size: 18),
                       tooltip: "Datei abrufen",
@@ -230,22 +179,30 @@ class FileModuleWidget extends StatelessWidget {
   // Inhalt (bytes) wird immer mitgespeichert, damit die Datei später
   // wieder abrufbar ist.
   Future<void> _pickAndAddFile(BuildContext context) async {
-    final picked = await pickFileInfo();
+    final PickedFileInfo? picked;
+    try {
+      picked = await pickFileInfo();
+    } on FileTooLargeException catch (e) {
+      if (!context.mounted) return;
+      showFileTooLargeSnackBar(context, e.sizeBytes, maxPickableFileSizeBytes);
+      return;
+    }
     if (picked == null || !context.mounted) return;
+    final resolvedPicked = picked;
 
-    final extension = _extensionOf(picked.name);
-    final fileType = _detectFileType(extension);
-    final suggestedName = _nameWithoutExtension(picked.name);
+    final extension = fileExtensionOf(resolvedPicked.name);
+    final fileType = detectFileType(extension);
+    final suggestedName = fileNameWithoutExtension(resolvedPicked.name);
 
     final existingOfType =
         module.entries.where((e) => e.fileType == fileType).toList();
     if (existingOfType.isNotEmpty) {
       _showExistingTypeDialog(context, existingOfType, suggestedName,
-          fileType, extension, picked.path, picked.bytes);
+          fileType, extension, resolvedPicked.path, resolvedPicked.bytes);
       return;
     }
-    _showNameDialog(
-        context, suggestedName, fileType, extension, picked.path, picked.bytes);
+    _showNameDialog(context, suggestedName, fileType, extension,
+        resolvedPicked.path, resolvedPicked.bytes);
   }
 
   Future<void> _addEntry(
@@ -257,7 +214,7 @@ class FileModuleWidget extends StatelessWidget {
     Uint8List? bytes,
     bool saveToDocumentation = false,
   }) async {
-    if (bytes != null && !await _confirmLargeFile(context, bytes.length)) {
+    if (bytes != null && !await confirmLargeFile(context, bytes.length)) {
       return;
     }
     if (!context.mounted) return;
@@ -311,7 +268,83 @@ class FileModuleWidget extends StatelessWidget {
     }
 
     ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(content: Text('"$name" hinzugefügt (${_typeLabel(fileType)})')),
+      SnackBar(content: Text('"$name" hinzugefügt (${fileTypeLabel(fileType)})')),
+    );
+
+    if (fileType == 'pdf' && bytes != null) {
+      await _detectAndPromptFinanceEntry(context, fileEntryId: id, bytes: bytes);
+    }
+  }
+
+  // Läuft nach dem Speichern eines PDFs (neue Datei oder neue Version),
+  // wenn das Finanzen-Modul aktiviert ist: liest den Text aus, versucht
+  // Typ/Betrag zu erkennen und öffnet - nur bei einem plausiblen Treffer,
+  // sonst bleibt der Upload einfach unauffällig - den ohnehin vorhandenen
+  // Erfassen-Dialog vorbefüllt. Speichert nie automatisch ohne Bestätigung.
+  Future<void> _detectAndPromptFinanceEntry(
+    BuildContext context, {
+    required String fileEntryId,
+    required Uint8List bytes,
+    FinanceEntry? existing,
+  }) async {
+    final store = context.read<ProjectStore>();
+    final project = store.projects.firstWhere((p) => p.id == projectId);
+    if (!project.financeEnabled) return;
+
+    final detected = await detectFinanceInfo(bytes);
+    if (!context.mounted) return;
+    if (detected.isEmpty && existing == null) return;
+
+    showFinanceEntryDialog(
+      context,
+      projectId: projectId,
+      gewerke: project.gewerke,
+      initialGewerkId: gewerkId,
+      fileModuleId: module.id,
+      fileEntryId: fileEntryId,
+      existing: existing,
+      detected: detected.isEmpty ? null : detected,
+    );
+  }
+
+  FinanceEntry? _existingFinanceEntryFor(Project project, String fileEntryId) {
+    for (final e in project.financeEntries) {
+      if (e.fileEntryId == fileEntryId) return e;
+    }
+    return null;
+  }
+
+  // Manueller Aufruf über den Button an einem PDF-Eintrag: liest die
+  // gespeicherte neueste Version erneut ein (funktioniert auch für Dateien,
+  // die hochgeladen wurden, bevor das Finanzen-Modul aktiviert war) und
+  // öffnet den Erfassen-/Bearbeiten-Dialog, vorbefüllt mit einem eventuell
+  // bereits bestehenden Eintrag.
+  Future<void> _showFinanceEntryForFile(
+      BuildContext context, FileEntry entry) async {
+    final store = context.read<ProjectStore>();
+    final project = store.projects.firstWhere((p) => p.id == projectId);
+    final existing = _existingFinanceEntryFor(project, entry.id);
+    final latest = entry.latestVersion;
+
+    FinanceDetectionResult? detected;
+    if (latest != null && latest.content.isNotEmpty) {
+      try {
+        detected = await detectFinanceInfo(base64Decode(latest.content));
+      } catch (_) {
+        detected = null;
+      }
+    }
+    if (!context.mounted) return;
+
+    showFinanceEntryDialog(
+      context,
+      projectId: projectId,
+      gewerke: project.gewerke,
+      initialGewerkId: gewerkId,
+      fileModuleId: module.id,
+      fileEntryId: entry.id,
+      existing: existing,
+      detected: (detected == null || detected.isEmpty) ? null : detected,
     );
   }
 
@@ -379,7 +412,7 @@ class FileModuleWidget extends StatelessWidget {
     String? sourcePath,
     Uint8List? bytes,
   }) async {
-    if (bytes != null && !await _confirmLargeFile(context, bytes.length)) {
+    if (bytes != null && !await confirmLargeFile(context, bytes.length)) {
       return;
     }
     if (!context.mounted) return;
@@ -414,6 +447,19 @@ class FileModuleWidget extends StatelessWidget {
     ScaffoldMessenger.of(context).showSnackBar(
       SnackBar(content: Text('"${entry.name}" aktualisiert (Version $label)')),
     );
+
+    if (entry.fileType == 'pdf' && bytes != null) {
+      final existing = _existingFinanceEntryFor(
+        store.projects.firstWhere((p) => p.id == projectId),
+        entry.id,
+      );
+      await _detectAndPromptFinanceEntry(
+        context,
+        fileEntryId: entry.id,
+        bytes: bytes,
+        existing: existing,
+      );
+    }
   }
 
   void _showExistingTypeDialog(
@@ -429,7 +475,7 @@ class FileModuleWidget extends StatelessWidget {
       context: context,
       builder: (dialogContext) {
         return AlertDialog(
-          title: Text("${_typeLabel(fileType)} hochladen"),
+          title: Text("${fileTypeLabel(fileType)} hochladen"),
           content: SizedBox(
             width: double.maxFinite,
             child: SingleChildScrollView(
@@ -439,14 +485,14 @@ class FileModuleWidget extends StatelessWidget {
                 children: [
                   Text(
                     "Aktualisiert das eine bestehende Datei vom Typ "
-                    "${_typeLabel(fileType)} oder ist es eine neue Datei?",
+                    "${fileTypeLabel(fileType)} oder ist es eine neue Datei?",
                     style: const TextStyle(color: Colors.grey),
                   ),
                   const SizedBox(height: 4),
                   ...existingOfType.map((entry) {
                     return ListTile(
                       contentPadding: EdgeInsets.zero,
-                      leading: Icon(_iconFor(fileType)),
+                      leading: Icon(fileTypeIcon(fileType)),
                       title: Text(entry.name),
                       subtitle: Text(
                         "wird Version ${_nextVersionLabel(entry)}",
@@ -509,7 +555,7 @@ class FileModuleWidget extends StatelessWidget {
         return StatefulBuilder(
           builder: (dialogContext, setDialogState) {
             return AlertDialog(
-              title: Text("${_typeLabel(fileType)} benennen"),
+              title: Text("${fileTypeLabel(fileType)} benennen"),
               content: Column(
                 mainAxisSize: MainAxisSize.min,
                 crossAxisAlignment: CrossAxisAlignment.start,
@@ -588,10 +634,18 @@ class FileModuleWidget extends StatelessWidget {
   // gespeichert.
   Future<void> _showNewVersionDialog(
       BuildContext context, FileEntry entry) async {
-    final picked = await pickFileInfo();
+    final PickedFileInfo? picked;
+    try {
+      picked = await pickFileInfo();
+    } on FileTooLargeException catch (e) {
+      if (!context.mounted) return;
+      showFileTooLargeSnackBar(context, e.sizeBytes, maxPickableFileSizeBytes);
+      return;
+    }
     if (picked == null || !context.mounted) return;
+    final resolvedPicked = picked;
 
-    final extension = _extensionOf(picked.name);
+    final extension = fileExtensionOf(resolvedPicked.name);
     final nextLabel = _nextVersionLabel(entry);
 
     showDialog(
@@ -600,7 +654,7 @@ class FileModuleWidget extends StatelessWidget {
         return AlertDialog(
           title: Text("Neue Version für ${entry.name}"),
           content: Text(
-            "\"${picked.name}\" wird als Version $nextLabel gespeichert.",
+            "\"${resolvedPicked.name}\" wird als Version $nextLabel gespeichert.",
           ),
           actions: [
             TextButton(
@@ -614,8 +668,8 @@ class FileModuleWidget extends StatelessWidget {
                   context,
                   entry,
                   extension: extension,
-                  sourcePath: picked.path,
-                  bytes: picked.bytes,
+                  sourcePath: resolvedPicked.path,
+                  bytes: resolvedPicked.bytes,
                 );
               },
               child: const Text("Hinzufügen"),

@@ -520,6 +520,14 @@ packages:
       url: "https://pub.dev"
     source: hosted
     version: "2.3.0"
+  pdf_manipulator:
+    dependency: "direct main"
+    description:
+      name: pdf_manipulator
+      sha256: "6d108c72a9f23d0dffde16efa28f28a28fb4411d227d24c6bab3171237f5129c"
+      url: "https://pub.dev"
+    source: hosted
+    version: "4.1.0"
   petitparser:
     dependency: transitive
     description:

@@ -36,6 +36,11 @@ migrate_working_dir/
 /build/
 /coverage/
 
+# Von `flutter pub run pdf_manipulator:setup` heruntergeladene WASM-Engine
+# (~18 MB, an die Paketversion gebunden) - generierte Build-Ressource, kein
+# Quellcode. Vor einem Web-Build einmalig neu erzeugen (siehe pubspec.yaml).
+web/pdf_manipulator/
+
 # Symbolication related
 app.*.symbols
 

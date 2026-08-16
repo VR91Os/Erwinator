@@ -3,6 +3,7 @@ import 'package:provider/provider.dart';
 
 import '../../models/modules/contact_module.dart';
 import '../../models/modules/file_module.dart';
+import '../../models/modules/finance_module.dart';
 import '../../models/modules/todo_module.dart';
 import '../../state/project_store.dart';
 
@@ -12,6 +13,7 @@ void showModulePickerDialog(
   String gewerkId,
 ) {
   final store = context.read<ProjectStore>();
+  final project = store.projects.firstWhere((p) => p.id == projectId);
 
   showDialog(
     context: context,
@@ -46,6 +48,17 @@ void showModulePickerDialog(
                 Navigator.pop(dialogContext);
               },
             ),
+            // Nur anlegbar, wenn das Finanzen-Modul in den Überblick-Optionen
+            // aktiviert ist (analog zur Zeitstatistik).
+            if (project.financeEnabled)
+              ListTile(
+                leading: const Icon(Icons.euro),
+                title: const Text("Finanzen"),
+                onTap: () {
+                  store.addModule(projectId, gewerkId, FinanceModule.moduleType);
+                  Navigator.pop(dialogContext);
+                },
+              ),
           ],
         ),
         actions: [

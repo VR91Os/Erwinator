@@ -21,6 +21,11 @@ void showTaskDialog(
   bool isHighPriority = false;
   DateTime? dueDate;
 
+  // .then(...) statt eines State-Objekts: der Dialog wird über eine lose
+  // Funktion statt eines StatefulWidgets aufgebaut, daher gibt es keinen
+  // dispose()-Lebenszyklus. showDialog()s Future wird aber garantiert bei
+  // jedem Schließen (Speichern, Verwerfen, Zurück-Taste, Tap außerhalb)
+  // abgeschlossen, das reicht hier als Ersatz.
   showDialog(
     context: context,
     builder: (dialogContext) {
@@ -147,5 +152,8 @@ void showTaskDialog(
         },
       );
     },
-  );
+  ).then((_) {
+    nameController.dispose();
+    descriptionController.dispose();
+  });
 }

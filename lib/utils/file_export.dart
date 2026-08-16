@@ -54,16 +54,49 @@ class PickedFileInfo {
   PickedFileInfo({required this.name, this.path, this.bytes});
 }
 
+// Harte Obergrenze für ausgewählte Dateien, unabhängig von der separaten
+// Warnung ab 15 MB in file_module_widget.dart (_confirmLargeFile) -
+// verhindert, dass eine versehentlich riesige Datei (mehrere hundert MB)
+// komplett in den Speicher geladen wird, bevor überhaupt eine Warnung
+// angezeigt werden könnte.
+const int maxPickableFileSizeBytes = 200 * 1024 * 1024;
+
+class FileTooLargeException implements Exception {
+  final int sizeBytes;
+  FileTooLargeException(this.sizeBytes);
+}
+
 // Öffnet den System-Dateiauswahl-Dialog für die File-Ablage. Liest den
-// Inhalt direkt mit ein (withData: true), damit die Datei in der
-// Projekt-Ablage gespeichert und später von jedem Projekt-Mitglied wieder
-// abgerufen werden kann – nicht nur Metadaten wie Name/Version. Gibt null
-// zurück, wenn abgebrochen wurde.
+// Inhalt mit ein, damit die Datei in der Projekt-Ablage gespeichert und
+// später von jedem Projekt-Mitglied wieder abgerufen werden kann - nicht
+// nur Metadaten wie Name/Version. Gibt null zurück, wenn abgebrochen wurde.
+// Wirft [FileTooLargeException], wenn die Datei die Obergrenze überschreitet.
 Future<PickedFileInfo?> pickFileInfo() async {
-  final result = await FilePicker.pickFiles(withData: true);
+  if (kIsWeb) {
+    // Web hat keinen Dateisystempfad - der Inhalt muss direkt beim Picken
+    // gelesen werden, ein zweistufiges Vorgehen wie unten würde eine zweite
+    // Dateiauswahl erfordern.
+    final result = await FilePicker.pickFiles(withData: true);
+    if (result == null || result.files.isEmpty) return null;
+    final file = result.files.single;
+    if (file.size > maxPickableFileSizeBytes) {
+      throw FileTooLargeException(file.size);
+    }
+    return PickedFileInfo(name: file.name, path: file.path, bytes: file.bytes);
+  }
+
+  // Nativ: erst nur Metadaten (inkl. Größe) lesen, bevor der komplette
+  // Dateiinhalt in den Speicher geladen wird - vermeidet ein OOM-Risiko bei
+  // versehentlich riesigen Dateien auf schwächeren Mobilgeräten.
+  final result = await FilePicker.pickFiles();
   if (result == null || result.files.isEmpty) return null;
   final file = result.files.single;
-  return PickedFileInfo(name: file.name, path: file.path, bytes: file.bytes);
+  if (file.size > maxPickableFileSizeBytes) {
+    throw FileTooLargeException(file.size);
+  }
+  final bytes =
+      file.path == null ? null : await io.File(file.path!).readAsBytes();
+  return PickedFileInfo(name: file.name, path: file.path, bytes: bytes);
 }
 
 // Speichert Binärdaten als Datei: im Browser als Download, auf

@@ -1,5 +1,6 @@
 import 'contact_module.dart';
 import 'file_module.dart';
+import 'finance_module.dart';
 import 'todo_module.dart';
 
 abstract class GewerkModule {
@@ -36,6 +37,8 @@ abstract class GewerkModule {
         return TodoModule.fromMap(map);
       case FileModule.moduleType:
         return FileModule.fromMap(map);
+      case FinanceModule.moduleType:
+        return FinanceModule.fromMap(map);
       default:
         throw ArgumentError('Unbekannter Modultyp: $type');
     }

@@ -7,6 +7,7 @@ import 'package:timezone/timezone.dart' as tz;
 
 import '../models/modules/todo_module.dart';
 import '../models/project.dart';
+import 'error_log_service.dart';
 
 // Plant echte Hintergrund-Benachrichtigungen für offene Prio-Aufgaben, die
 // die projektweit einstellbare Warnschwelle (Tage vor Fälligkeit) erreichen.
@@ -67,6 +68,16 @@ class NotificationService {
   // Stabile Notification-ID aus der (app-weit eindeutigen) Task-ID.
   int _notificationId(String taskId) => taskId.hashCode & 0x7fffffff;
 
+  static const _channelDetails = AndroidNotificationDetails(
+    'priority_warning',
+    'Prio-Aufgaben-Warnung',
+    channelDescription:
+        'Benachrichtigung, wenn eine offene Prio-Aufgabe die '
+        'eingestellte Warnschwelle vor der Fälligkeit erreicht.',
+    importance: Importance.high,
+    priority: Priority.high,
+  );
+
   // Merkt sich lokal, für welche Aufgaben bereits eine
   // Nachhol-Benachrichtigung (siehe unten) gezeigt wurde, damit sie bei
   // jedem Sync (der bei jeder Projekt-Änderung läuft) nicht erneut feuert.
@@ -76,8 +87,13 @@ class NotificationService {
     if (!_initialized) return;
     try {
       await _plugin.cancelAll();
-    } catch (_) {
-      return;
+    } catch (e, stack) {
+      // Nicht abbrechen: auch wenn das Aufräumen alter Termine fehlschlägt,
+      // soll die Nachhol-Benachrichtigung für verpasste Warnschwellen unten
+      // trotzdem laufen, statt auf Plattformen mit fehlschlagendem
+      // cancelAll() dauerhaft und unbemerkt nie mehr auszulösen.
+      ErrorLogService.instance
+          .record('Benachrichtigungen zurücksetzen fehlgeschlagen', '$e\n$stack');
     }
 
     final prefs = await SharedPreferences.getInstance();
@@ -143,15 +159,7 @@ class NotificationService {
         scheduledDate: tz.TZDateTime.from(scheduledDate, tz.local),
         androidScheduleMode: AndroidScheduleMode.exactAllowWhileIdle,
         notificationDetails: const NotificationDetails(
-          android: AndroidNotificationDetails(
-            'priority_warning',
-            'Prio-Aufgaben-Warnung',
-            channelDescription:
-                'Benachrichtigung, wenn eine offene Prio-Aufgabe die '
-                'eingestellte Warnschwelle vor der Fälligkeit erreicht.',
-            importance: Importance.high,
-            priority: Priority.high,
-          ),
+          android: _channelDetails,
           iOS: DarwinNotificationDetails(),
           macOS: DarwinNotificationDetails(),
         ),
@@ -175,15 +183,7 @@ class NotificationService {
         title: title,
         body: body,
         notificationDetails: const NotificationDetails(
-          android: AndroidNotificationDetails(
-            'priority_warning',
-            'Prio-Aufgaben-Warnung',
-            channelDescription:
-                'Benachrichtigung, wenn eine offene Prio-Aufgabe die '
-                'eingestellte Warnschwelle vor der Fälligkeit erreicht.',
-            importance: Importance.high,
-            priority: Priority.high,
-          ),
+          android: _channelDetails,
           iOS: DarwinNotificationDetails(),
           macOS: DarwinNotificationDetails(),
         ),

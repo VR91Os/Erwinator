@@ -54,6 +54,7 @@ class SettingsStore extends ChangeNotifier {
   Future<void> setLastProject(String projectId) async {
     if (settings.lastProjectId == projectId) return;
     settings.lastProjectId = projectId;
+    notifyListeners();
     await _persist();
   }
 

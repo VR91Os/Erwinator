@@ -35,12 +35,20 @@ void main() {
     await NotificationService.instance.init();
 
     // Projekt-Teilen ist optional: ohne ausgefüllte supabase_config.dart
-    // bleibt die App vollständig lokal nutzbar, wie bisher.
+    // bleibt die App vollständig lokal nutzbar, wie bisher. Schlägt die
+    // Initialisierung fehl (z.B. keine Internetverbindung beim ersten
+    // Start), darf das nicht runApp() verhindern, sonst bleibt der Screen
+    // leer und der Nutzer sieht nie, was im Fehlerprotokoll steht.
     if (supabaseUrl.isNotEmpty && supabaseAnonKey.isNotEmpty) {
-      await Supabase.initialize(
-        url: supabaseUrl,
-        publishableKey: supabaseAnonKey,
-      );
+      try {
+        await Supabase.initialize(
+          url: supabaseUrl,
+          publishableKey: supabaseAnonKey,
+        );
+      } catch (e, stack) {
+        ErrorLogService.instance
+            .record('Supabase-Initialisierung fehlgeschlagen', '$e\n$stack');
+      }
     }
     runApp(const BaustellenApp());
   }, (error, stack) {

@@ -3,12 +3,14 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:baustelli/models/app_settings.dart';
 import 'package:baustelli/models/audit_entry.dart';
 import 'package:baustelli/models/checklist_item.dart';
+import 'package:baustelli/models/finance_entry.dart';
 import 'package:baustelli/models/gewerk.dart';
 import 'package:baustelli/models/image_annotation.dart';
 import 'package:baustelli/models/modules/contact_module.dart';
 import 'package:baustelli/models/helper_demand.dart';
 import 'package:baustelli/models/modules/file_module.dart';
 import 'package:baustelli/models/modules/todo_module.dart';
+import 'package:baustelli/models/presence_entry.dart';
 import 'package:baustelli/models/project.dart';
 import 'package:baustelli/models/project_member.dart';
 import 'package:baustelli/models/task.dart';
@@ -307,6 +309,50 @@ void main() {
       expect(restored.toMap(), project.toMap());
     });
 
+    test('FinanceEntry mit Netto/Brutto und automatischer Erkennung', () {
+      final entry = FinanceEntry(
+        id: 'f1',
+        gewerkId: 'g1',
+        fileModuleId: 'm1',
+        fileEntryId: 'file1',
+        documentType: FinanceDocumentType.rechnung,
+        amountGross: 960.0,
+        amountNet: 800.0,
+        date: DateTime(2026, 3, 1),
+        note: 'Mustermann GmbH',
+        autoDetected: true,
+        createdBy: 'MAMU',
+        history: [
+          AuditEntry(kurzzeichen: 'MAMU', action: 'erfasst', timestamp: DateTime(2026, 3, 1)),
+        ],
+      );
+      final restored = FinanceEntry.fromMap(entry.toMap());
+      expect(restored.toMap(), entry.toMap());
+    });
+
+    test('Project mit aktiviertem Finanzen-Modul und Einträgen', () {
+      final project = Project(
+        'p5',
+        'Finanzen-Projekt',
+        financeEnabled: true,
+        financeEntries: [
+          FinanceEntry(
+            id: 'f1',
+            gewerkId: 'g1',
+            documentType: FinanceDocumentType.angebot,
+            amountGross: 1440.0,
+            amountNet: 1200.0,
+            createdBy: 'MAMU',
+          ),
+        ],
+      );
+      final restored = Project.fromMap(project.toMap());
+      expect(restored.toMap(), project.toMap());
+      expect(restored.financeEnabled, true);
+      expect(restored.financeEntries, hasLength(1));
+      expect(restored.financeEntries.single.amountGross, 1440.0);
+    });
+
     test('Project mit sharedId (geteiltes Projekt)', () {
       final project = Project(
         'p3',
@@ -361,7 +407,10 @@ void main() {
         id: 'day1',
         date: DateTime(2026, 4, 6),
         hours: 8.5,
-        helperNames: const ['Anna Huber', 'Max Mustermann'],
+        helperNames: [
+          PresenceEntry('Anna Huber', updatedAt: DateTime(2026, 4, 6)),
+          PresenceEntry('Max Mustermann', updatedAt: DateTime(2026, 4, 6)),
+        ],
         history: [
           AuditEntry(
               kurzzeichen: 'MAMU',
@@ -392,11 +441,15 @@ void main() {
             id: 'day1',
             date: DateTime(2026, 4, 6),
             hours: 6,
-            helperNames: const ['Anna Huber'],
+            helperNames: [
+              PresenceEntry('Anna Huber', updatedAt: DateTime(2026, 4, 6)),
+            ],
           ),
         ],
         activeWorkTimeProfileId: 'profile1',
-        onSitePresence: const ['Max Mustermann'],
+        onSitePresence: [
+          PresenceEntry('Max Mustermann', updatedAt: DateTime(2026, 4, 1)),
+        ],
         shiftDays: 5,
         archiveAfterDays: 10,
         moveCompletedToArchiveToo: true,
@@ -406,7 +459,7 @@ void main() {
       final restored = Project.fromMap(project.toMap());
       expect(restored.toMap(), project.toMap());
       expect(restored.activeWorkTimeProfileId, 'profile1');
-      expect(restored.onSitePresence, ['Max Mustermann']);
+      expect(restored.onSitePresence.map((e) => e.person), ['Max Mustermann']);
       expect(restored.shiftDays, 5);
       expect(restored.archiveAfterDays, 10);
       expect(restored.moveCompletedToArchiveToo, true);
