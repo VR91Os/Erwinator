@@ -49,6 +49,14 @@ class _OverviewSettingsScreenState extends State<OverviewSettingsScreen> {
     return tasks;
   }
 
+  // Aufgaben, die laut den beiden Export-Checkboxen in die .ics gehören
+  // (gemeinsam von _exportProject und _exportIcsOnly genutzt).
+  List<Task> _icsTasks(Project project) => _allTasks(project).where((t) {
+        if (t.status == 'archiviert' || t.dueDate == null) return false;
+        if (project.exportAllDatedTodos) return true;
+        return t.isHighPriority;
+      }).toList();
+
   Future<void> _exportProject(BuildContext context, Project project) async {
     final json = const JsonEncoder.withIndent('  ').convert(project.toMap());
     await exportTextFile(
@@ -57,12 +65,7 @@ class _OverviewSettingsScreenState extends State<OverviewSettingsScreen> {
     );
 
     if (project.exportAllDatedTodos || project.exportPriorityTasks) {
-      final tasks = _allTasks(project).where((t) {
-        if (t.status == 'archiviert' || t.dueDate == null) return false;
-        if (project.exportAllDatedTodos) return true;
-        return t.isHighPriority;
-      }).toList();
-
+      final tasks = _icsTasks(project);
       if (tasks.isNotEmpty) {
         final ics = buildIcs(tasks, calendarName: project.name);
         await exportTextFile(
@@ -75,6 +78,33 @@ class _OverviewSettingsScreenState extends State<OverviewSettingsScreen> {
     if (context.mounted) {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(content: Text("Projekt exportiert")),
+      );
+    }
+  }
+
+  // Exportiert nur die .ics-Kalenderdatei, ohne den vollständigen
+  // Projekt-Export – z.B. um sie erneut in einen Kalender zu importieren,
+  // ohne dabei die komplette Projekt-JSON mit abzulegen.
+  Future<void> _exportIcsOnly(BuildContext context, Project project) async {
+    final tasks = _icsTasks(project);
+    if (tasks.isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text("Keine passenden Aufgaben für die Kalenderdatei."),
+        ),
+      );
+      return;
+    }
+
+    final ics = buildIcs(tasks, calendarName: project.name);
+    await exportTextFile(
+      fileName: '${project.name}_kalender.ics',
+      content: ics,
+    );
+
+    if (context.mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text("Kalenderdatei exportiert")),
       );
     }
   }
@@ -199,9 +229,12 @@ class _OverviewSettingsScreenState extends State<OverviewSettingsScreen> {
           ),
           const SizedBox(height: 4),
           const Text(
-            "Optionales Modul: erkennt bei PDF-Uploads automatisch Angebote/"
-            "Rechnungen samt Betrag (Vorschlag, immer manuell zu bestätigen) "
-            "und fasst sie projektweit sowie je Gewerk zusammen. Legt keine "
+            "Optionales Modul für Angebote/Rechnungen: Beträge können "
+            "jederzeit manuell erfasst werden (\"Eintrag hinzufügen\" im "
+            "Finanzen-Modul eines Gewerks oder in der Finanzen-Übersicht) "
+            "und werden zusätzlich bei PDF-Uploads automatisch erkannt und "
+            "vorgeschlagen (immer manuell zu bestätigen). Fasst alle "
+            "Einträge projektweit sowie je Gewerk zusammen. Legt keine "
             "Dateien doppelt ab, nur die Betragsdaten.",
             style: TextStyle(color: Colors.grey),
           ),
@@ -278,6 +311,15 @@ class _OverviewSettingsScreenState extends State<OverviewSettingsScreen> {
             ".ics-Kalenderdatei erzeugt – importierbar in Google Kalender, "
             "Outlook etc.",
             style: TextStyle(color: Colors.grey),
+          ),
+          const SizedBox(height: 12),
+          OutlinedButton.icon(
+            onPressed:
+                (project.exportAllDatedTodos || project.exportPriorityTasks)
+                    ? () => _exportIcsOnly(context, project)
+                    : null,
+            icon: const Icon(Icons.event),
+            label: const Text("Nur Kalenderdatei (.ics) exportieren"),
           ),
           const SizedBox(height: 24),
           const Text(

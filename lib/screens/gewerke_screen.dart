@@ -30,6 +30,20 @@ const _fileArchiveTabId = '__files__';
 const _timeTrackingTabId = '__time__';
 const _financeOverviewTabId = '__finance__';
 
+class _TabDef {
+  final String id;
+  final String label;
+  final bool accent;
+  final bool urgent;
+
+  const _TabDef({
+    required this.id,
+    required this.label,
+    this.accent = false,
+    this.urgent = false,
+  });
+}
+
 class GewerkeScreen extends StatefulWidget {
   final String projectId;
 
@@ -150,53 +164,8 @@ class _GewerkeScreenState extends State<GewerkeScreen> {
         children: [
           SizedBox(
             height: 60,
-            child: ListView(
-              scrollDirection: Axis.horizontal,
-              children: [
-                _tabChip(
-                  label: "Überblick",
-                  selected: selectedTabId == _overviewTabId,
-                  accent: true,
-                  urgent: projectHasUrgentPriorityTask(project),
-                  onTap: () => setState(() => selectedTabId = _overviewTabId),
-                ),
-                ...project.gewerke.map((gewerk) {
-                  return _tabChip(
-                    label: gewerk.name,
-                    selected: selectedTabId == gewerk.id,
-                    urgent: gewerkHasUrgentPriorityTask(
-                        gewerk, project.priorityWarningDays),
-                    onTap: () => setState(() => selectedTabId = gewerk.id),
-                  );
-                }),
-                // ✅ Dateiablage ist immer der letzte feste System-Reiter vor
-                // der optionalen Zeitstatistik, ganz rechts.
-                _tabChip(
-                  label: "Dateiablage",
-                  selected: isFileArchive,
-                  accent: true,
-                  onTap: () =>
-                      setState(() => selectedTabId = _fileArchiveTabId),
-                ),
-                // ✅ Nur sichtbar, wenn in den Überblick-Optionen aktiviert.
-                if (project.timeTrackingEnabled)
-                  _tabChip(
-                    label: "Zeitstatistik",
-                    selected: isTimeTracking,
-                    accent: true,
-                    onTap: () =>
-                        setState(() => selectedTabId = _timeTrackingTabId),
-                  ),
-                if (project.financeEnabled)
-                  _tabChip(
-                    label: "Finanzen",
-                    selected: isFinanceOverview,
-                    accent: true,
-                    onTap: () => setState(
-                        () => selectedTabId = _financeOverviewTabId),
-                  ),
-              ],
-            ),
+            child: _buildTabBar(context, store, project, isFileArchive,
+                isTimeTracking, isFinanceOverview),
           ),
           Expanded(
             child: Padding(
@@ -213,11 +182,93 @@ class _GewerkeScreenState extends State<GewerkeScreen> {
                           ? TimeTrackingSection(project: project)
                           : isFinanceOverview
                               ? FinanceOverviewSection(project: project)
-                              : _buildGewerkContent(project, selectedGewerk!),
+                              : _buildGewerkContent(
+                                  store, project, selectedGewerk!),
             ),
           ),
         ],
       ),
+    );
+  }
+
+  // ✅ Frei per Drag&Drop sortierbare Reiter-Leiste: Reihenfolge kommt aus
+  // project.tabOrder (IDs), neue/entfernte Reiter (neues Gewerk, gerade
+  // aktiviertes Zeitstatistik-/Finanzen-Modul, gelöschtes Gewerk) werden
+  // automatisch ergänzt bzw. herausgefiltert, ohne die gespeicherte
+  // Reihenfolge der übrigen Reiter zu verändern.
+  Widget _buildTabBar(
+    BuildContext context,
+    ProjectStore store,
+    Project project,
+    bool isFileArchive,
+    bool isTimeTracking,
+    bool isFinanceOverview,
+  ) {
+    final defaultTabs = <_TabDef>[
+      _TabDef(
+        id: _overviewTabId,
+        label: "Überblick",
+        accent: true,
+        urgent: projectHasUrgentPriorityTask(project),
+      ),
+      ...project.gewerke.map((gewerk) => _TabDef(
+            id: gewerk.id,
+            label: gewerk.name,
+            urgent: gewerkHasUrgentPriorityTask(
+                gewerk, project.priorityWarningDays),
+          )),
+      const _TabDef(id: _fileArchiveTabId, label: "Dateiablage", accent: true),
+      if (project.timeTrackingEnabled)
+        const _TabDef(
+            id: _timeTrackingTabId, label: "Zeitstatistik", accent: true),
+      if (project.financeEnabled)
+        const _TabDef(
+            id: _financeOverviewTabId, label: "Finanzen", accent: true),
+    ];
+
+    final byId = {for (final t in defaultTabs) t.id: t};
+    final tabs = <_TabDef>[];
+    for (final id in project.tabOrder) {
+      final t = byId.remove(id);
+      if (t != null) tabs.add(t);
+    }
+    for (final t in defaultTabs) {
+      if (byId.containsKey(t.id)) tabs.add(t);
+    }
+
+    return ReorderableListView.builder(
+      scrollDirection: Axis.horizontal,
+      buildDefaultDragHandles: false,
+      itemCount: tabs.length,
+      onReorderItem: (oldIndex, newIndex) {
+        final ids = tabs.map((t) => t.id).toList();
+        final moved = ids.removeAt(oldIndex);
+        ids.insert(newIndex, moved);
+        store.updateTabOrder(project.id, ids);
+      },
+      itemBuilder: (context, index) {
+        final tab = tabs[index];
+        final selected = tab.id == _overviewTabId
+            ? selectedTabId == _overviewTabId
+            : tab.id == _fileArchiveTabId
+                ? isFileArchive
+                : tab.id == _timeTrackingTabId
+                    ? isTimeTracking
+                    : tab.id == _financeOverviewTabId
+                        ? isFinanceOverview
+                        : selectedTabId == tab.id;
+        return ReorderableDelayedDragStartListener(
+          key: ValueKey(tab.id),
+          index: index,
+          child: _tabChip(
+            label: tab.label,
+            selected: selected,
+            accent: tab.accent,
+            urgent: tab.urgent,
+            onTap: () => setState(() => selectedTabId = tab.id),
+          ),
+        );
+      },
     );
   }
 
@@ -261,21 +312,33 @@ class _GewerkeScreenState extends State<GewerkeScreen> {
     );
   }
 
-  Widget _buildGewerkContent(Project project, Gewerk gewerk) {
-    return ListView(
-      children: [
-        if (gewerk.modules.isEmpty)
-          const Padding(
-            padding: EdgeInsets.symmetric(vertical: 20),
-            child: Text("Noch keine Module – oben links hinzufügen"),
-          ),
-        ...gewerk.modules.map((module) {
-          return Padding(
+  // ✅ Module lassen sich per Long-Press + Ziehen frei sortieren (analog zur
+  // Reiter-Leiste oben, siehe _buildTabBar) - Reihenfolge landet direkt in
+  // gewerk.modules statt in einem separaten Order-Feld.
+  Widget _buildGewerkContent(
+      ProjectStore store, Project project, Gewerk gewerk) {
+    if (gewerk.modules.isEmpty) {
+      return const Padding(
+        padding: EdgeInsets.symmetric(vertical: 20),
+        child: Text("Noch keine Module – oben links hinzufügen"),
+      );
+    }
+    return ReorderableListView.builder(
+      buildDefaultDragHandles: false,
+      itemCount: gewerk.modules.length,
+      onReorderItem: (oldIndex, newIndex) => store.reorderModules(
+          project.id, gewerk.id, oldIndex, newIndex),
+      itemBuilder: (context, index) {
+        final module = gewerk.modules[index];
+        return ReorderableDelayedDragStartListener(
+          key: ValueKey(module.id),
+          index: index,
+          child: Padding(
             padding: const EdgeInsets.only(bottom: 12),
             child: _moduleWidget(project.id, gewerk.id, module),
-          );
-        }),
-      ],
+          ),
+        );
+      },
     );
   }
 

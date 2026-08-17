@@ -87,6 +87,13 @@ class Project {
   bool financeEnabled;
   List<FinanceEntry> financeEntries;
 
+  // Vom Nutzer frei festgelegte Reihenfolge der Reiter oben in der
+  // Projektansicht (Überblick, Gewerke, Dateiablage, Zeitstatistik,
+  // Finanzen - als IDs). Fehlende Einträge (neues Gewerk, neu aktiviertes
+  // Modul) werden von GewerkeScreen automatisch hinten angehängt, entfernte
+  // (gelöschtes Gewerk) einfach ignoriert - hier wird nichts aufgeräumt.
+  List<String> tabOrder;
+
   // Wann eines der obigen Projekt-weiten Felder zuletzt geändert wurde
   // (für den Sync-Merge, Option C).
   DateTime updatedAt;
@@ -129,6 +136,7 @@ class Project {
     List<PresenceEntry>? onSitePresence,
     this.financeEnabled = false,
     List<FinanceEntry>? financeEntries,
+    List<String>? tabOrder,
     DateTime? updatedAt,
     Map<String, DateTime>? deletedIds,
     this.sharedId,
@@ -138,6 +146,7 @@ class Project {
         workDayEntries = workDayEntries ?? [],
         onSitePresence = onSitePresence ?? [],
         financeEntries = financeEntries ?? [],
+        tabOrder = tabOrder ?? [],
         updatedAt = updatedAt ?? DateTime.now(),
         deletedIds = deletedIds ?? {};
 
@@ -166,6 +175,7 @@ class Project {
         'onSitePresence': onSitePresence.map((e) => e.toMap()).toList(),
         'financeEnabled': financeEnabled,
         'financeEntries': financeEntries.map((e) => e.toMap()).toList(),
+        'tabOrder': tabOrder,
         'updatedAt': updatedAt.toIso8601String(),
         'deletedIds': deletedIds
             .map((id, deletedAt) => MapEntry(id, deletedAt.toIso8601String())),
@@ -211,6 +221,9 @@ class Project {
         financeEnabled: map['financeEnabled'] as bool? ?? false,
         financeEntries: (map['financeEntries'] as List<dynamic>? ?? [])
             .map((e) => FinanceEntry.fromMap(e as Map<String, dynamic>))
+            .toList(),
+        tabOrder: (map['tabOrder'] as List<dynamic>? ?? [])
+            .map((e) => e as String)
             .toList(),
         updatedAt: map['updatedAt'] == null
             ? DateTime.fromMillisecondsSinceEpoch(0)
@@ -278,6 +291,7 @@ class Project {
       extendedTimeCalendar: winner.extendedTimeCalendar,
       activeWorkTimeProfileId: winner.activeWorkTimeProfileId,
       financeEnabled: winner.financeEnabled,
+      tabOrder: winner.tabOrder,
       updatedAt: winner.updatedAt,
       deletedIds: tombstones,
       sharedId: sharedId ?? remote.sharedId,

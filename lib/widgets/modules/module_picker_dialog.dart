@@ -49,16 +49,25 @@ void showModulePickerDialog(
               },
             ),
             // Nur anlegbar, wenn das Finanzen-Modul in den Überblick-Optionen
-            // aktiviert ist (analog zur Zeitstatistik).
-            if (project.financeEnabled)
-              ListTile(
-                leading: const Icon(Icons.euro),
-                title: const Text("Finanzen"),
-                onTap: () {
-                  store.addModule(projectId, gewerkId, FinanceModule.moduleType);
-                  Navigator.pop(dialogContext);
-                },
-              ),
+            // aktiviert ist (analog zur Zeitstatistik) - bleibt aber sichtbar
+            // (statt zu verschwinden), damit der Grund auffindbar ist, statt
+            // wie ein fehlendes Feature zu wirken.
+            ListTile(
+              leading: Icon(Icons.euro,
+                  color: project.financeEnabled ? null : Colors.grey),
+              title: const Text("Finanzen"),
+              subtitle: project.financeEnabled
+                  ? null
+                  : const Text(
+                      "Zuerst im Überblick unter Optionen aktivieren",
+                      style: TextStyle(fontSize: 11),
+                    ),
+              enabled: project.financeEnabled,
+              onTap: () {
+                store.addModule(projectId, gewerkId, FinanceModule.moduleType);
+                Navigator.pop(dialogContext);
+              },
+            ),
           ],
         ),
         actions: [

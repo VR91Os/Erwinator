@@ -200,7 +200,9 @@ class _TimeTrackingSectionState extends State<TimeTrackingSection> {
           child: Text(
             "Helfer werden im Überblick über \"Helfer eintragen\" erfasst "
             "und erscheinen hier automatisch, wenn der Tag laut aktivem "
-            "Profil ein Arbeitstag ist. Tag antippen zeigt die Details.",
+            "Profil ein Arbeitstag ist. \"Ich bin auf der Baustelle\" und "
+            "\"Zeit erfassen\" tragen zusätzlich zu diesen Stunden bei, "
+            "statt sie zu ersetzen. Tag antippen zeigt die Details.",
             style: TextStyle(color: Colors.grey, fontSize: 12),
           ),
         ),
@@ -216,12 +218,24 @@ class _TimeTrackingSectionState extends State<TimeTrackingSection> {
                 : Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      Text(
-                        "${selectedDay!.day}.${selectedDay!.month}."
-                        "${selectedDay!.year}: "
-                        "${_formatHours(selectedEntry.hours)} Std",
-                        style:
-                            const TextStyle(fontWeight: FontWeight.bold),
+                      Row(
+                        children: [
+                          Expanded(
+                            child: Text(
+                              "${selectedDay!.day}.${selectedDay!.month}."
+                              "${selectedDay!.year}: "
+                              "${_formatHours(selectedEntry.hours)} Std",
+                              style: const TextStyle(
+                                  fontWeight: FontWeight.bold),
+                            ),
+                          ),
+                          IconButton(
+                            icon: const Icon(Icons.edit_outlined, size: 20),
+                            tooltip: "Tag korrigieren",
+                            onPressed: () => _showEditDayDialog(
+                                context, project, selectedEntry),
+                          ),
+                        ],
                       ),
                       if (selectedEntry.helperNames.isEmpty)
                         const Text("Keine Helfer eingetragen")
@@ -268,6 +282,15 @@ void _showApplyProfileDialog(BuildContext context, Project project) {
                 mainAxisSize: MainAxisSize.min,
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
+                  const Padding(
+                    padding: EdgeInsets.only(bottom: 10),
+                    child: Text(
+                      "Wird zu den an den gewählten Tagen bereits erfassten "
+                      "Stunden dazugerechnet – z.B. für einen zusätzlich, "
+                      "später oder früher hinzukommenden Helfer.",
+                      style: TextStyle(color: Colors.grey, fontSize: 12),
+                    ),
+                  ),
                   DropdownButtonFormField<WorkTimeProfile>(
                     initialValue: selectedProfile,
                     decoration: const InputDecoration(labelText: "Profil"),
@@ -366,5 +389,134 @@ void _showApplyProfileDialog(BuildContext context, Project project) {
         },
       );
     },
+  );
+}
+
+// Korrektur eines einzelnen bereits erfassten Tages: Stunden direkt
+// überschreiben (anders als die additiven Erfassungswege) oder einzelne
+// Helfer/den ganzen Tag entfernen - für versehentliche Mehrfach-Erfassungen.
+void _showEditDayDialog(
+  BuildContext context,
+  Project project,
+  WorkDayEntry entry,
+) {
+  final store = context.read<ProjectStore>();
+  final actor = context.read<SettingsStore>().currentUserKurzzeichen;
+  final hoursController =
+      TextEditingController(text: _formatHours(entry.hours));
+
+  showDialog(
+    context: context,
+    builder: (dialogContext) {
+      return StatefulBuilder(
+        builder: (context, setDialogState) {
+          return AlertDialog(
+            title: Text(
+              "Zeit korrigieren – ${entry.date.day}.${entry.date.month}."
+              "${entry.date.year}",
+            ),
+            content: SingleChildScrollView(
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  TextField(
+                    controller: hoursController,
+                    keyboardType:
+                        const TextInputType.numberWithOptions(decimal: true),
+                    decoration: const InputDecoration(
+                      labelText: "Stunden",
+                      suffixText: "Std",
+                    ),
+                    autofocus: true,
+                  ),
+                  if (entry.helperNames.isNotEmpty) ...[
+                    const SizedBox(height: 12),
+                    const Text("Helfer",
+                        style: TextStyle(fontWeight: FontWeight.bold)),
+                    ...entry.helperNames.map((p) => ListTile(
+                          contentPadding: EdgeInsets.zero,
+                          dense: true,
+                          title: Text(p.person),
+                          trailing: IconButton(
+                            icon: const Icon(Icons.close, size: 18),
+                            tooltip: "Helfer entfernen",
+                            onPressed: () {
+                              store.removeWorkDayHelper(
+                                  project.id, entry.id, p.person);
+                              setDialogState(() {});
+                            },
+                          ),
+                        )),
+                  ],
+                ],
+              ),
+            ),
+            actions: [
+              TextButton(
+                onPressed: () {
+                  Navigator.pop(dialogContext);
+                  _confirmDeleteDay(context, store, project, entry);
+                },
+                style: TextButton.styleFrom(foregroundColor: Colors.red),
+                child: const Text("Tag löschen"),
+              ),
+              TextButton(
+                onPressed: () => Navigator.pop(dialogContext),
+                child: const Text("Abbrechen"),
+              ),
+              ElevatedButton(
+                onPressed: () {
+                  final hours = double.tryParse(
+                      hoursController.text.trim().replaceAll(',', '.'));
+                  if (hours == null || hours < 0) return;
+                  store.updateWorkDayEntryHours(
+                    project.id,
+                    entry.id,
+                    hours: hours,
+                    actor: actor,
+                  );
+                  Navigator.pop(dialogContext);
+                },
+                child: const Text("Speichern"),
+              ),
+            ],
+          );
+        },
+      );
+    },
+  ).then((_) => hoursController.dispose());
+}
+
+void _confirmDeleteDay(
+  BuildContext context,
+  ProjectStore store,
+  Project project,
+  WorkDayEntry entry,
+) {
+  showDialog(
+    context: context,
+    builder: (dialogContext) => AlertDialog(
+      title: const Text("Tag löschen?"),
+      content: Text(
+        "Die erfassten ${_formatHours(entry.hours)} Std am "
+        "${entry.date.day}.${entry.date.month}.${entry.date.year} werden "
+        "entfernt.",
+      ),
+      actions: [
+        TextButton(
+          onPressed: () => Navigator.pop(dialogContext),
+          child: const Text("Abbrechen"),
+        ),
+        ElevatedButton(
+          style: ElevatedButton.styleFrom(backgroundColor: Colors.red),
+          onPressed: () {
+            store.removeWorkDayEntry(project.id, entry.id);
+            Navigator.pop(dialogContext);
+          },
+          child: const Text("Löschen"),
+        ),
+      ],
+    ),
   );
 }

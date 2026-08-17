@@ -23,6 +23,37 @@ class ModuleCard extends StatelessWidget {
     required this.child,
   });
 
+  void _confirmDelete(BuildContext context) {
+    showDialog(
+      context: context,
+      builder: (dialogContext) {
+        return AlertDialog(
+          title: const Text("Modul entfernen?"),
+          content: Text(
+            '"${label.isEmpty ? defaultTitle : label}" wird inklusive '
+            'aller darin erfassten Einträge entfernt.',
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(dialogContext),
+              child: const Text("Abbrechen"),
+            ),
+            ElevatedButton(
+              style: ElevatedButton.styleFrom(backgroundColor: Colors.red),
+              onPressed: () {
+                Navigator.pop(dialogContext);
+                context
+                    .read<ProjectStore>()
+                    .removeModule(projectId, gewerkId, moduleId);
+              },
+              child: const Text("Entfernen"),
+            ),
+          ],
+        );
+      },
+    );
+  }
+
   void _showRenameDialog(BuildContext context) {
     final controller = TextEditingController(text: label);
     showDialog(
@@ -91,11 +122,7 @@ class ModuleCard extends StatelessWidget {
               IconButton(
                 icon: const Icon(Icons.delete_outline, size: 20),
                 tooltip: "Modul entfernen",
-                onPressed: () {
-                  context
-                      .read<ProjectStore>()
-                      .removeModule(projectId, gewerkId, moduleId);
-                },
+                onPressed: () => _confirmDelete(context),
               ),
             ],
           ),

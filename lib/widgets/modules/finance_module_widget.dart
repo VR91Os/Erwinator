@@ -5,6 +5,7 @@ import '../../models/finance_entry.dart';
 import '../../models/modules/finance_module.dart';
 import '../../models/project.dart';
 import '../../state/project_store.dart';
+import '../../utils/amount_format.dart';
 import '../dialogs/finance_entry_dialog.dart';
 import 'module_card.dart';
 
@@ -28,9 +29,6 @@ class FinanceModuleWidget extends StatefulWidget {
 
 class _FinanceModuleWidgetState extends State<FinanceModuleWidget> {
   _AmountDisplay _display = _AmountDisplay.gross;
-
-  String _formatAmount(double value) =>
-      '${value.toStringAsFixed(2).replaceAll('.', ',')} €';
 
   String _typeLabel(String documentType) =>
       documentType == FinanceDocumentType.angebot ? 'Angebot' : 'Rechnung';
@@ -68,10 +66,10 @@ class _FinanceModuleWidgetState extends State<FinanceModuleWidget> {
       final net = sumNet(list);
       final parts = <String>[];
       if (_display == _AmountDisplay.gross || _display == _AmountDisplay.both) {
-        parts.add('Brutto ${_formatAmount(gross)}');
+        parts.add('Brutto ${formatAmount(gross)}');
       }
       if (_display == _AmountDisplay.net || _display == _AmountDisplay.both) {
-        parts.add(net == null ? 'Netto –' : 'Netto ${_formatAmount(net)}');
+        parts.add(net == null ? 'Netto –' : 'Netto ${formatAmount(net)}');
       }
       return Padding(
         padding: const EdgeInsets.only(bottom: 4),
@@ -84,8 +82,8 @@ class _FinanceModuleWidgetState extends State<FinanceModuleWidget> {
 
     Widget entryRow(FinanceEntry entry) {
       final amountText = _display == _AmountDisplay.net
-          ? (entry.amountNet == null ? '–' : _formatAmount(entry.amountNet!))
-          : _formatAmount(entry.amountGross);
+          ? (entry.amountNet == null ? '–' : formatAmount(entry.amountNet!))
+          : formatAmount(entry.amountGross);
       return ListTile(
         contentPadding: EdgeInsets.zero,
         dense: true,

@@ -1,3 +1,4 @@
+import 'package:flutter/foundation.dart' show kIsWeb, defaultTargetPlatform;
 import 'package:flutter/material.dart';
 import 'package:flutter_contacts/flutter_contacts.dart';
 import 'package:provider/provider.dart';
@@ -150,6 +151,27 @@ class ContactModuleWidget extends StatelessWidget {
     }
   }
 
+  // Nur am Smartphone sinnvoll (Gmail-App bzw. E-Mail-App gibt es auf
+  // Desktop/Web nicht in gleicher Form).
+  bool get _isSmartphone =>
+      !kIsWeb &&
+      (defaultTargetPlatform == TargetPlatform.android ||
+          defaultTargetPlatform == TargetPlatform.iOS);
+
+  // Öffnet direkt die Gmail-App (Deep Link); ist sie nicht installiert,
+  // fällt es auf die Standard-Mail-App des Geräts zurück.
+  Future<void> _openGmail(BuildContext context) async {
+    final launched = await launchUrl(Uri.parse('googlegmail://'));
+    if (!launched) {
+      final fallback = await launchUrl(Uri.parse('mailto:'));
+      if (!fallback && context.mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text("Gmail konnte nicht geöffnet werden.")),
+        );
+      }
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     final actor = context.watch<SettingsStore>().currentUserKurzzeichen;
@@ -175,6 +197,17 @@ class ContactModuleWidget extends StatelessWidget {
               AuditInfoIcon(history: module.history),
             ],
           ),
+          if (_isSmartphone)
+            Padding(
+              padding: const EdgeInsets.symmetric(vertical: 8),
+              child: Center(
+                child: OutlinedButton.icon(
+                  onPressed: () => _openGmail(context),
+                  icon: const Icon(Icons.email_outlined, size: 18),
+                  label: const Text("Gmail öffnen"),
+                ),
+              ),
+            ),
           if (module.contacts.isEmpty)
             const Padding(
               padding: EdgeInsets.symmetric(vertical: 6),

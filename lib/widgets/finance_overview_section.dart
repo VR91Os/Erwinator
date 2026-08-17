@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import '../models/finance_entry.dart';
 import '../models/gewerk.dart';
 import '../models/project.dart';
+import '../utils/amount_format.dart';
 import 'dialogs/finance_entry_dialog.dart';
 
 enum _AmountDisplay { gross, net, both }
@@ -25,9 +26,6 @@ class FinanceOverviewSection extends StatefulWidget {
 class _FinanceOverviewSectionState extends State<FinanceOverviewSection> {
   _AmountDisplay _display = _AmountDisplay.gross;
 
-  String _formatAmount(double value) =>
-      '${value.toStringAsFixed(2).replaceAll('.', ',')} €';
-
   double _sumGross(List<FinanceEntry> list) =>
       list.fold<double>(0.0, (sum, e) => sum + e.amountGross);
 
@@ -41,10 +39,10 @@ class _FinanceOverviewSectionState extends State<FinanceOverviewSection> {
     final net = _sumNet(list);
     final parts = <String>[];
     if (_display == _AmountDisplay.gross || _display == _AmountDisplay.both) {
-      parts.add('Brutto ${_formatAmount(gross)}');
+      parts.add('Brutto ${formatAmount(gross)}');
     }
     if (_display == _AmountDisplay.net || _display == _AmountDisplay.both) {
-      parts.add(net == null ? 'Netto –' : 'Netto ${_formatAmount(net)}');
+      parts.add(net == null ? 'Netto –' : 'Netto ${formatAmount(net)}');
     }
     return parts.join(' · ');
   }
@@ -137,8 +135,8 @@ class _FinanceOverviewSectionState extends State<FinanceOverviewSection> {
                 final amountText = _display == _AmountDisplay.net
                     ? (entry.amountNet == null
                         ? '–'
-                        : _formatAmount(entry.amountNet!))
-                    : _formatAmount(entry.amountGross);
+                        : formatAmount(entry.amountNet!))
+                    : formatAmount(entry.amountGross);
                 return ListTile(
                   dense: true,
                   leading: Icon(

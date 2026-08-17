@@ -495,6 +495,25 @@ class ProjectStore extends ChangeNotifier {
     await _persist(projectId);
   }
 
+  // Frei per Drag&Drop sortierbare Module innerhalb eines Gewerks (analog
+  // zu updateTabOrder für die Reiter-Leiste). newIndex kommt bereits
+  // "post-removal" an (siehe ReorderableListView.onReorderItem), also ohne
+  // die sonst nötige oldIndex/newIndex-Korrektur.
+  Future<void> reorderModules(
+    String projectId,
+    String gewerkId,
+    int oldIndex,
+    int newIndex,
+  ) async {
+    final gewerk = _gewerk(projectId, gewerkId);
+    if (gewerk == null) return;
+    final module = gewerk.modules.removeAt(oldIndex);
+    gewerk.modules.insert(newIndex, module);
+    gewerk.updatedAt = DateTime.now();
+    notifyListeners();
+    await _persist(projectId);
+  }
+
   Future<void> addTaskToTodoModule(
     String projectId,
     String gewerkId,
@@ -1011,10 +1030,12 @@ class ProjectStore extends ChangeNotifier {
     await _persist(projectId);
   }
 
-  // Ist an [day] laut aktivem Arbeitszeitprofil ein Arbeitstag, wird der
-  // Helfer automatisch (mit den daraus berechneten Stunden) in die
-  // Zeitstatistik übernommen – Helfer eintragen im Überblick ist die
-  // einzige Erfassungsstelle, die Zeitstatistik zeigt nur die Auswertung.
+  // Ist an [day] laut aktivem Arbeitszeitprofil ein Arbeitstag, trägt der
+  // Helfer automatisch die daraus berechneten Stunden zur Zeitstatistik
+  // BEI (statt sie zu überschreiben) – Helfer eintragen im Überblick ist
+  // die einzige Erfassungsstelle, die Zeitstatistik zeigt nur die
+  // Auswertung. Jeder Helfer zählt nur einmal (Prüfung über helperNames),
+  // damit ein erneuter Sync (z.B. Merge) die Stunden nicht doppelt addiert.
   void _syncHelperIntoTimeTracking(
     Project project,
     DateTime day,
@@ -1028,11 +1049,10 @@ class ProjectStore extends ChangeNotifier {
       if (e.date.isAtSameMomentAs(day)) entry = e;
     }
     if (entry != null) {
-      entry.hours = schedule.hours;
+      if (entry.helperNames.any((p) => p.person == helperName)) return;
+      entry.hours += schedule.hours;
+      entry.helperNames.add(PresenceEntry(helperName));
       entry.updatedAt = DateTime.now();
-      if (!entry.helperNames.any((p) => p.person == helperName)) {
-        entry.helperNames.add(PresenceEntry(helperName));
-      }
       entry.history.add(AuditEntry(
         kurzzeichen: actor,
         action: 'Aus Helferbedarf übernommen: $helperName',
@@ -1071,13 +1091,23 @@ class ProjectStore extends ChangeNotifier {
     demand.signups.removeWhere((s) => s.id == signupId);
     project.deletedIds[signupId] = DateTime.now();
     final day = _dateOnly(demand.date);
+    final schedule = project.activeWorkTimeProfile?.scheduleFor(day.weekday);
     for (final signup in removedSignups) {
       WorkDayEntry? dayEntry;
       for (final e in project.workDayEntries) {
         if (e.date.isAtSameMomentAs(day)) dayEntry = e;
       }
       if (dayEntry == null) continue;
+      final wasCounted =
+          dayEntry.helperNames.any((p) => p.person == signup.name);
       dayEntry.helperNames.removeWhere((p) => p.person == signup.name);
+      // Die beim Eintragen addierten Stunden (siehe
+      // _syncHelperIntoTimeTracking) wieder abziehen, sonst bleibt die
+      // Zeitstatistik nach dem Entfernen eines Helfers dauerhaft zu hoch.
+      if (wasCounted && schedule != null) {
+        dayEntry.hours =
+            (dayEntry.hours - schedule.hours).clamp(0, double.infinity);
+      }
       // Tombstone + frischer Zeitstempel, sonst würde ein späterer Merge
       // (z.B. wenn ein anderes Gerät zwischenzeitlich nur die Stunden
       // dieses Tages geändert hat) den entfernten Helfer aus der älteren
@@ -1132,10 +1162,13 @@ class ProjectStore extends ChangeNotifier {
     await syncOnSitePresenceForToday(projectId, actor: person);
   }
 
-  // Solange mindestens ein Nutzer als anwesend markiert ist, wird jeder Tag,
-  // der laut aktivem Profil ein Arbeitstag ist, automatisch in die
-  // Zeitstatistik übernommen – ohne dass dafür ein Helfer eingetragen
-  // werden muss. Wird beim Öffnen des Projekts aufgerufen (für "heute").
+  // Solange mindestens ein Nutzer als anwesend markiert ist, trägt jeder
+  // Tag, der laut aktivem Profil ein Arbeitstag ist, automatisch dessen
+  // Stunden zur Zeitstatistik BEI (statt sie zu überschreiben) – ohne dass
+  // dafür ein Helfer eingetragen werden muss. Wird beim Öffnen des Projekts
+  // aufgerufen (für "heute"). Jede Person zählt nur einmal (Prüfung über
+  // helperNames), damit ein erneuter Sync am selben Tag (z.B. jedes
+  // App-Öffnen) die Stunden nicht doppelt addiert.
   Future<void> syncOnSitePresenceForToday(
     String projectId, {
     required String actor,
@@ -1150,25 +1183,20 @@ class ProjectStore extends ChangeNotifier {
     for (final e in project.workDayEntries) {
       if (e.date.isAtSameMomentAs(today)) entry = e;
     }
-    var changed = false;
-    if (entry != null) {
-      if (entry.hours != schedule.hours) {
-        entry.hours = schedule.hours;
-        entry.updatedAt = DateTime.now();
-        changed = true;
-      }
-    } else {
-      entry = WorkDayEntry(id: newId(), date: today, hours: schedule.hours);
-      project.workDayEntries.add(entry);
-      changed = true;
+    final alreadyCounted =
+        entry?.helperNames.map((p) => p.person).toSet() ?? <String>{};
+    final newPresences = project.onSitePresence
+        .where((p) => !alreadyCounted.contains(p.person))
+        .toList();
+    if (newPresences.isEmpty) return;
+
+    final isNewEntry = entry == null;
+    entry ??= WorkDayEntry(id: newId(), date: today, hours: 0);
+    for (final presence in newPresences) {
+      entry.helperNames.add(PresenceEntry(presence.person));
+      entry.hours += schedule.hours;
     }
-    for (final presence in project.onSitePresence) {
-      if (!entry.helperNames.any((p) => p.person == presence.person)) {
-        entry.helperNames.add(PresenceEntry(presence.person));
-        changed = true;
-      }
-    }
-    if (!changed) return;
+    if (isNewEntry) project.workDayEntries.add(entry);
     entry.updatedAt = DateTime.now();
     entry.history
         .add(AuditEntry(kurzzeichen: actor, action: 'Anwesenheit synchronisiert'));
@@ -1244,10 +1272,17 @@ class ProjectStore extends ChangeNotifier {
     await _persist(projectId);
   }
 
-  // Wendet ein Arbeitszeitprofil auf jeden Tag im Zeitraum [from, to] an:
-  // Wochentage ohne Zeitplan im Profil werden übersprungen (arbeitsfrei).
-  // Bereits erfasste Tage werden mit den neuen Stunden überschrieben, ihre
-  // Helferliste bleibt erhalten.
+  // Manuelles "Zeit erfassen": wendet ein Arbeitszeitprofil auf jeden Tag im
+  // Zeitraum [from, to] an und ADDIERT die daraus berechneten Stunden zu
+  // bereits an diesem Tag erfassten Stunden (z.B. aus "Helfer eintragen"
+  // oder "Ich bin auf der Baustelle") dazu, statt sie zu überschreiben –
+  // so bildet ein zusätzlich/später/früher hinzukommender Helfer eine
+  // eigene, additive Erfassung ab. Wochentage ohne Zeitplan im Profil
+  // werden übersprungen (arbeitsfrei). Anders als die automatischen
+  // Sync-Pfade (Helferbedarf, Anwesenheit) ist dies eine bewusste,
+  // wiederholbare Nutzeraktion – mehrfaches Anwenden addiert entsprechend
+  // mehrfach, ganz analog zu einem manuell mehrfach hinzugefügten
+  // Finanz-Eintrag.
   Future<void> applyWorkTimeProfile(
     String projectId, {
     required WorkTimeProfile profile,
@@ -1269,11 +1304,11 @@ class ProjectStore extends ChangeNotifier {
       if (schedule == null) continue;
       final auditEntry = AuditEntry(
         kurzzeichen: actor,
-        action: 'Profil "${profile.name}" angewendet',
+        action: 'Profil "${profile.name}" angewendet (+${schedule.hours}h)',
       );
       final existing = byDate[day];
       if (existing != null) {
-        existing.hours = schedule.hours;
+        existing.hours += schedule.hours;
         existing.updatedAt = DateTime.now();
         existing.history.add(auditEntry);
       } else {
@@ -1291,8 +1326,64 @@ class ProjectStore extends ChangeNotifier {
     await _persist(projectId);
   }
 
-  // Legt einen Arbeitstag manuell an oder überschreibt einen bestehenden
-  // (z.B. um einen aus einem Profil erzeugten Tag im Kalender nachzujustieren).
+  // Manuelle Korrektur eines bereits erfassten Tages im Zeitstatistik-
+  // Kalender: setzt die Stunden direkt (im Gegensatz zu den additiven
+  // Erfassungswegen oben) auf den angegebenen Wert, um z.B. eine
+  // versehentliche Mehrfach-Erfassung wieder geradezurücken.
+  Future<void> updateWorkDayEntryHours(
+    String projectId,
+    String entryId, {
+    required double hours,
+    required String actor,
+  }) async {
+    final project = _project(projectId);
+    if (project == null) return;
+    WorkDayEntry? entry;
+    for (final e in project.workDayEntries) {
+      if (e.id == entryId) entry = e;
+    }
+    if (entry == null) return;
+    entry.hours = hours;
+    entry.updatedAt = DateTime.now();
+    entry.history
+        .add(AuditEntry(kurzzeichen: actor, action: 'Stunden korrigiert'));
+    notifyListeners();
+    await _persist(projectId);
+  }
+
+  // Entfernt einen einzelnen Helfer aus einem bereits erfassten Tag, ohne
+  // die Stunden anzupassen (reine Korrektur der Namensliste, z.B. wenn
+  // jemand versehentlich für den falschen Tag eingetragen wurde) - anders
+  // als removeHelperSignup, das zum passenden Helferbedarf-Eintrag gehört.
+  Future<void> removeWorkDayHelper(
+    String projectId,
+    String entryId,
+    String person,
+  ) async {
+    final project = _project(projectId);
+    if (project == null) return;
+    WorkDayEntry? entry;
+    for (final e in project.workDayEntries) {
+      if (e.id == entryId) entry = e;
+    }
+    if (entry == null) return;
+    entry.helperNames.removeWhere((p) => p.person == person);
+    project.deletedIds['helper:$entryId:$person'] = DateTime.now();
+    entry.updatedAt = DateTime.now();
+    notifyListeners();
+    await _persist(projectId);
+  }
+
+  // Löscht einen kompletten erfassten Tag (Stunden + Helferliste), z.B. um
+  // eine versehentliche Erfassung rückgängig zu machen.
+  Future<void> removeWorkDayEntry(String projectId, String entryId) async {
+    final project = _project(projectId);
+    if (project == null) return;
+    project.workDayEntries.removeWhere((e) => e.id == entryId);
+    project.deletedIds[entryId] = DateTime.now();
+    notifyListeners();
+    await _persist(projectId);
+  }
 
   Future<void> updateFinanceEnabled(
     String projectId, {
@@ -1301,6 +1392,15 @@ class ProjectStore extends ChangeNotifier {
     final project = _project(projectId);
     if (project == null) return;
     project.financeEnabled = enabled;
+    project.updatedAt = DateTime.now();
+    notifyListeners();
+    await _persist(projectId);
+  }
+
+  Future<void> updateTabOrder(String projectId, List<String> tabOrder) async {
+    final project = _project(projectId);
+    if (project == null) return;
+    project.tabOrder = tabOrder;
     project.updatedAt = DateTime.now();
     notifyListeners();
     await _persist(projectId);

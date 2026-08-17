@@ -6,20 +6,16 @@ import '../../models/finance_entry.dart';
 import '../../models/gewerk.dart';
 import '../../state/project_store.dart';
 import '../../state/settings_store.dart';
+import '../../utils/amount_format.dart';
 import '../../utils/finance_detection.dart';
 import '../../utils/id_generator.dart';
 
-double? _parseAmount(String raw) {
-  final trimmed = raw.trim();
-  if (trimmed.isEmpty) return null;
-  return double.tryParse(trimmed.replaceAll('.', '').replaceAll(',', '.'));
-}
-
-String _formatAmount(double? value) {
-  if (value == null) return '';
-  // Deutsches Format (Komma als Dezimaltrennzeichen), passend zur Eingabe.
-  return value.toStringAsFixed(2).replaceAll('.', ',');
-}
+// Normaler österreichischer Umsatzsteuersatz - nur als Rechenhilfe, falls
+// Netto/Brutto weder im PDF erkannt noch manuell eingetragen wurde. Ergibt
+// bei abweichendem Steuersatz (z.B. 10%/13%) einen falschen Vorschlag, den
+// der Nutzer dann selbst überschreiben muss - deshalb nie automatisch
+// gespeichert, sondern nur als vorausgefüllter, weiter editierbarer Wert.
+const _austrianVatFactor = 1.20;
 
 // Erfassen/Bearbeiten eines Angebots/einer Rechnung. Wird sowohl beim
 // PDF-Upload (mit [detected]-Vorbefüllung, nie automatisch gespeichert
@@ -56,15 +52,64 @@ void showFinanceEntryDialog(
       existing?.documentType ??
       FinanceDocumentType.rechnung;
   final grossController = TextEditingController(
-    text: _formatAmount(detected?.amountGross ?? existing?.amountGross),
+    text: formatAmountForInput(detected?.amountGross ?? existing?.amountGross),
   );
   final netController = TextEditingController(
-    text: _formatAmount(detected?.amountNet ?? existing?.amountNet),
+    text: formatAmountForInput(detected?.amountNet ?? existing?.amountNet),
   );
   final noteController = TextEditingController(text: existing?.note ?? '');
   DateTime? date = existing?.date;
   final autoDetected = hasFreshDetection ? true : (existing?.autoDetected ?? false);
   final showGewerkPicker = existing == null && allowGewerkPicker;
+
+  // Rechnet Netto/Brutto mit dem normalen österreichischen USt-Satz
+  // gegenseitig hoch/runter, solange das jeweils andere Feld leer ist oder
+  // selbst nur so errechnet wurde - eine echte Eingabe (Erkennung oder
+  // Tippen) wird nie überschrieben.
+  var nettoIsCalculated = false;
+  var grossIsCalculated = false;
+  var syncingAmounts = false;
+  void syncNettoFromGross() {
+    final gross = parseAmount(grossController.text);
+    if (gross == null) return;
+    syncingAmounts = true;
+    netController.text =
+        formatAmountForInput(roundToCents(gross / _austrianVatFactor));
+    syncingAmounts = false;
+    nettoIsCalculated = true;
+  }
+
+  void syncGrossFromNetto() {
+    final netto = parseAmount(netController.text);
+    if (netto == null) return;
+    syncingAmounts = true;
+    grossController.text =
+        formatAmountForInput(roundToCents(netto * _austrianVatFactor));
+    syncingAmounts = false;
+    grossIsCalculated = true;
+  }
+
+  grossController.addListener(() {
+    if (syncingAmounts) return;
+    grossIsCalculated = false;
+    if (netController.text.isEmpty || nettoIsCalculated) {
+      syncNettoFromGross();
+    }
+  });
+  netController.addListener(() {
+    if (syncingAmounts) return;
+    nettoIsCalculated = false;
+    if (grossController.text.isEmpty || grossIsCalculated) {
+      syncGrossFromNetto();
+    }
+  });
+  // Direkt beim Öffnen einmalig nachziehen, falls PDF-Erkennung oder ein
+  // bestehender Eintrag nur eine der beiden Seiten geliefert hat.
+  if (netController.text.isEmpty && grossController.text.isNotEmpty) {
+    syncNettoFromGross();
+  } else if (grossController.text.isEmpty && netController.text.isNotEmpty) {
+    syncGrossFromNetto();
+  }
 
   showDialog(
     context: context,
@@ -122,6 +167,7 @@ void showFinanceEntryDialog(
                     controller: grossController,
                     keyboardType:
                         const TextInputType.numberWithOptions(decimal: true),
+                    inputFormatters: [ThousandsSeparatorInputFormatter()],
                     decoration: const InputDecoration(
                       labelText: "Brutto-Gesamtbetrag *",
                       suffixText: "€",
@@ -134,9 +180,19 @@ void showFinanceEntryDialog(
                     controller: netController,
                     keyboardType:
                         const TextInputType.numberWithOptions(decimal: true),
+                    inputFormatters: [ThousandsSeparatorInputFormatter()],
                     decoration: const InputDecoration(
                       labelText: "Netto (optional)",
                       suffixText: "€",
+                    ),
+                  ),
+                  const Padding(
+                    padding: EdgeInsets.only(top: 4),
+                    child: Text(
+                      "Wird bei 20% USt automatisch aus dem jeweils anderen "
+                      "Betrag berechnet, solange nichts eingetragen ist – "
+                      "bei abweichendem Steuersatz einfach überschreiben.",
+                      style: TextStyle(color: Colors.grey, fontSize: 11),
                     ),
                   ),
                   const SizedBox(height: 10),
@@ -191,10 +247,10 @@ void showFinanceEntryDialog(
               ),
               ElevatedButton(
                 onPressed: () {
-                  final gross = _parseAmount(grossController.text);
+                  final gross = parseAmount(grossController.text);
                   final resolvedGewerkId = gewerkId;
                   if (gross == null || resolvedGewerkId == null) return;
-                  final net = _parseAmount(netController.text);
+                  final net = parseAmount(netController.text);
                   Navigator.pop(dialogContext);
 
                   if (existing == null) {
