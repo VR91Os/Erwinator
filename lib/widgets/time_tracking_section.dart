@@ -74,27 +74,42 @@ class _TimeTrackingSectionState extends State<TimeTrackingSection> {
       );
     }
 
+    // Tageszahl per Stack fest zentriert (wie im nicht-erweiterten Zweig
+    // oben und wie table_calendars eigene Standardzelle bei Tagen ohne
+    // Eintrag) statt in einer mainAxisAlignment.center-Column zusammen mit
+    // Stunden/Helfer-Zeile: eine Column zentriert den GANZEN Block, wodurch
+    // die Zahl je nach An-/Abwesenheit der Helfer-Zeile (2 vs. 3 Zeilen) hoch-
+    // /runterrutschte - sichtbar als "springende" Tageszahlen zwischen
+    // Tagen mit und ohne Eintrag.
     return Container(
       margin: const EdgeInsets.all(2),
       decoration: BoxDecoration(
         color: Colors.teal.shade50,
         borderRadius: BorderRadius.circular(6),
       ),
-      alignment: Alignment.center,
-      child: Column(
-        mainAxisAlignment: MainAxisAlignment.center,
+      child: Stack(
+        alignment: Alignment.center,
         children: [
           Text('${day.day}',
               style: const TextStyle(color: lightSurfaceTextColor)),
-          Text(
-            '${_formatHours(entry.hours)}h',
-            style: const TextStyle(fontSize: 9, color: Colors.teal),
-          ),
-          if (entry.helperNames.isNotEmpty)
-            Text(
-              '👥${entry.helperNames.length}',
-              style: const TextStyle(fontSize: 9, color: lightSurfaceTextColor),
+          Positioned(
+            bottom: 2,
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Text(
+                  '${_formatHours(entry.hours)}h',
+                  style: const TextStyle(fontSize: 9, color: Colors.teal),
+                ),
+                if (entry.helperNames.isNotEmpty)
+                  Text(
+                    '👥${entry.helperNames.length}',
+                    style: const TextStyle(
+                        fontSize: 9, color: lightSurfaceTextColor),
+                  ),
+              ],
             ),
+          ),
         ],
       ),
     );
