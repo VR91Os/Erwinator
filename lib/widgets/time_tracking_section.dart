@@ -465,16 +465,28 @@ void _showManualTimeDialog(BuildContext context, Project project) {
                 onPressed: selectedDays.isEmpty || perPersonHours <= 0
                     ? null
                     : () {
-                        store.addManualTimeEntry(
-                          project.id,
-                          days: selectedDays,
-                          startTime: _formatTime(start),
-                          endTime: _formatTime(end),
-                          breakMinutes: breakMinutes,
-                          personCount: personCount,
-                          actor: actor,
-                        );
+                        final days = Set<DateTime>.from(selectedDays);
+                        final startTime = _formatTime(start);
+                        final endTime = _formatTime(end);
                         Navigator.pop(dialogContext);
+                        // Erst nach dem aktuellen Frame speichern (wie beim
+                        // Reiter-/Modul-Reorder in gewerke_screen.dart):
+                        // store.addManualTimeEntry löst über notifyListeners()
+                        // einen Provider-weiten Rebuild aus - passiert das
+                        // noch synchron, während Navigator.pop den Dialog
+                        // gerade abbaut, kollidiert das mit dessen Element-
+                        // Abbau ("_dependents.isEmpty"-Assertion).
+                        WidgetsBinding.instance.addPostFrameCallback((_) {
+                          store.addManualTimeEntry(
+                            project.id,
+                            days: days,
+                            startTime: startTime,
+                            endTime: endTime,
+                            breakMinutes: breakMinutes,
+                            personCount: personCount,
+                            actor: actor,
+                          );
+                        });
                       },
                 child: const Text("Hinzufügen"),
               ),
@@ -536,13 +548,20 @@ void _showQuickHoursDialog(BuildContext context, Project project) {
               final hours = double.tryParse(
                   hoursController.text.trim().replaceAll(',', '.'));
               if (hours == null || hours <= 0) return;
-              store.addQuickHourEntry(
-                project.id,
-                hours: hours,
-                note: noteController.text,
-                actor: actor,
-              );
+              final note = noteController.text;
               Navigator.pop(dialogContext);
+              // Erst nach dem aktuellen Frame speichern (siehe
+              // _showManualTimeDialog oben) - vermeidet die
+              // "_dependents.isEmpty"-Assertion durch einen Provider-Rebuild
+              // während Navigator.pop den Dialog noch abbaut.
+              WidgetsBinding.instance.addPostFrameCallback((_) {
+                store.addQuickHourEntry(
+                  project.id,
+                  hours: hours,
+                  note: note,
+                  actor: actor,
+                );
+              });
             },
             child: const Text("Hinzufügen"),
           ),
