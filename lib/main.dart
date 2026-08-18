@@ -2,6 +2,8 @@ import 'dart:async';
 
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
+import 'package:intl/date_symbol_data_local.dart';
+import 'package:intl/intl.dart';
 import 'package:provider/provider.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
@@ -31,6 +33,13 @@ void main() {
       ErrorLogService.instance.record(error.toString(), stack.toString());
       return true;
     };
+
+    // Für die Monats-/Wochentagsnamen im Kalender (Zeitstatistik, Überblick)
+    // - ohne das rendert table_calendar auf Englisch, weil die App (bewusst
+    // sonst rein hartcodiertes Deutsch, kein MaterialApp-Locale-Setup) sich
+    // sonst auf die Flutter-Standardlokalisierung ("en") verlässt.
+    await initializeDateFormatting('de_DE');
+    Intl.defaultLocale = 'de_DE';
 
     await NotificationService.instance.init();
 

@@ -53,6 +53,9 @@ dependencies:
   # sind an die Version gebunden, ein `pub upgrade` darf sie nicht stillschweigend überholen.
   pdf_manipulator: 4.1.0
   mobile_scanner: ^7.4.0
+  android_intent_plus: ^6.1.0
+  open_filex: ^4.7.0
+  intl: ^0.20.3
 
 dev_dependencies:
   flutter_test:

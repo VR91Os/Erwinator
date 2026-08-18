@@ -150,11 +150,13 @@ class FileModuleWidget extends StatelessWidget {
             return Padding(
               padding: const EdgeInsets.only(top: 8),
               // Name antippen öffnet die Datei: bei Fotos die Bearbeitung,
-              // sonst dasselbe Abrufen wie über den Download-Button.
+              // sonst die passende System-App (PDF-Reader etc.) - der
+              // separate Download-Button daneben bleibt für "explizit eine
+              // Kopie irgendwohin speichern".
               child: InkWell(
                 onTap: () => isPhoto
                     ? _openPhoto(context, entry)
-                    : _downloadEntry(context, entry),
+                    : _openEntry(context, entry),
                 child: content,
               ),
             );
@@ -346,6 +348,13 @@ class FileModuleWidget extends StatelessWidget {
       existing: existing,
       detected: (detected == null || detected.isEmpty) ? null : detected,
     );
+  }
+
+  Future<void> _openEntry(BuildContext context, FileEntry entry) async {
+    final error = await openFileEntryContent(entry);
+    if (error != null && context.mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(error)));
+    }
   }
 
   Future<void> _downloadEntry(BuildContext context, FileEntry entry) async {

@@ -4,6 +4,8 @@ import 'dart:typed_data';
 
 import 'package:file_picker/file_picker.dart';
 import 'package:flutter/foundation.dart' show kIsWeb;
+import 'package:open_filex/open_filex.dart';
+import 'package:path_provider/path_provider.dart';
 
 import '../models/modules/file_module.dart';
 
@@ -138,4 +140,38 @@ Future<bool> downloadFileEntryContent(FileEntry entry) async {
   final latest = entry.latestVersion;
   if (latest == null) return false;
   return downloadFileVersionContent(entry, latest);
+}
+
+// Öffnet eine bereits in der File-Ablage gespeicherte Datei direkt in der
+// passenden System-App (PDF-Reader, Bildbetrachter, ...) statt sie nur
+// erneut irgendwohin zu exportieren - das war vorher das einzige Verhalten
+// beim Antippen und wirkte wie "nochmal speichern" statt "öffnen". Dafür
+// wird der Inhalt einmalig in einen temporären Cache-Ordner geschrieben,
+// da open_filex einen echten Dateipfad braucht, keine rohen Bytes. Web hat
+// keinen für sowas nutzbaren Dateisystem-Zugriff -> bleibt beim
+// Download-Verhalten (der Browser übernimmt dort ohnehin oft direkt eine
+// Vorschau, je nach Dateityp). Gibt bei Erfolg null zurück, sonst eine für
+// den Nutzer verständliche Fehlermeldung.
+Future<String?> openFileEntryContent(FileEntry entry) async {
+  final latest = entry.latestVersion;
+  if (latest == null || latest.content.isEmpty) {
+    return "Für diese Datei ist kein Inhalt gespeichert (z.B. vor diesem "
+        "Update hochgeladen).";
+  }
+  if (kIsWeb) {
+    final ok = await downloadFileEntryContent(entry);
+    return ok ? null : "Datei konnte nicht geöffnet werden.";
+  }
+  final bytes = base64Decode(latest.content);
+  final fileName = latest.extension.isEmpty
+      ? entry.name
+      : '${entry.name}.${latest.extension}';
+  final dir = await getTemporaryDirectory();
+  final file = io.File('${dir.path}/$fileName');
+  await file.writeAsBytes(bytes);
+  final result = await OpenFilex.open(file.path);
+  if (result.type == ResultType.done) return null;
+  return result.type == ResultType.noAppToOpen
+      ? "Keine App zum Öffnen dieses Dateityps installiert."
+      : "Datei konnte nicht geöffnet werden (${result.message}).";
 }

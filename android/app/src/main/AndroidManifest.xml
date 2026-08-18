@@ -69,11 +69,14 @@
         </intent>
         <intent>
             <action android:name="android.intent.action.VIEW"/>
-            <data android:scheme="googlegmail"/>
-        </intent>
-        <intent>
-            <action android:name="android.intent.action.VIEW"/>
             <data android:scheme="mailto"/>
         </intent>
+        <!-- Für "Gmail öffnen" im Kontakt-Modul (android_intent_plus): ohne
+             diesen Eintrag liefert PackageManager.resolveActivity() für das
+             explizite Gmail-Launcher-Intent wegen der Package-Visibility ab
+             Android 11 "nicht gefunden" zurück, selbst wenn Gmail
+             installiert ist - der Aufruf würde dann immer auf die
+             mailto:-Alternative zurückfallen. -->
+        <package android:name="com.google.android.gm"/>
     </queries>
 </manifest>

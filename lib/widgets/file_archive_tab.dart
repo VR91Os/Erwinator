@@ -23,8 +23,9 @@ const _allTypes = 'alle';
 
 // Zeigt alle Dateien aus allen File-Ablage-Modulen des Projekts gesammelt
 // an, durchsuchbar über Namen/Gewerk und filterbar nach Dateityp, Ersteller
-// und Hochlade-Zeitraum. Ein Treffer springt zum jeweiligen Gewerk-Reiter,
-// da Hoch-/Neu-Versionieren dort passiert.
+// und Hochlade-Zeitraum. Ein Treffer öffnet die Datei direkt; ein eigener
+// Button springt zum jeweiligen Gewerk-Reiter, da Hoch-/Neu-Versionieren
+// dort passiert.
 class FileArchiveTab extends StatefulWidget {
   final Project project;
   final ValueChanged<String> onOpenGewerk;
@@ -111,6 +112,14 @@ class _FileArchiveTabState extends State<FileArchiveTab> {
           ),
         ),
       );
+    }
+  }
+
+  Future<void> _open(_FileRef ref) async {
+    final error = await openFileEntryContent(ref.entry);
+    if (error != null && mounted) {
+      ScaffoldMessenger.of(context)
+          .showSnackBar(SnackBar(content: Text(error)));
     }
   }
 
@@ -263,6 +272,12 @@ class _FileArchiveTabState extends State<FileArchiveTab> {
                         mainAxisSize: MainAxisSize.min,
                         children: [
                           IconButton(
+                            icon: const Icon(Icons.open_in_new, size: 18),
+                            tooltip: "Zum Gewerk-Reiter springen",
+                            onPressed: () =>
+                                widget.onOpenGewerk(ref.gewerk.id),
+                          ),
+                          IconButton(
                             icon: const Icon(Icons.download_outlined,
                                 size: 18),
                             tooltip: "Datei abrufen",
@@ -271,7 +286,11 @@ class _FileArchiveTabState extends State<FileArchiveTab> {
                           AuditInfoIcon(history: ref.entry.history),
                         ],
                       ),
-                      onTap: () => widget.onOpenGewerk(ref.gewerk.id),
+                      // Antippen öffnet die Datei direkt (wie überall sonst
+                      // in der App) - Sprung zum Gewerk-Reiter (z.B. für
+                      // eine neue Version) läuft über den eigenen Button
+                      // links davon.
+                      onTap: () => _open(ref),
                     );
                   },
                 ),

@@ -227,28 +227,6 @@ class _OverviewSettingsScreenState extends State<OverviewSettingsScreen> {
           ),
           const Divider(height: 40),
           const Text(
-            "Kontaktdaten",
-            style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
-          ),
-          const SizedBox(height: 4),
-          const Text(
-            "Ist die Checkbox aus, bleibt das Kontakt-Modul auf Name und "
-            "Telefonnummer beschränkt. Aktiviert zeigt jede Person "
-            "zusätzlich ein Email-Feld (manuell hinzufügen und bei "
-            "bestehenden Personen).",
-            style: TextStyle(color: Colors.grey),
-          ),
-          CheckboxListTile(
-            contentPadding: EdgeInsets.zero,
-            title: const Text("Auch Email angeben"),
-            value: project.showContactEmail,
-            onChanged: (value) => store.updateShowContactEmail(
-              widget.projectId,
-              enabled: value ?? false,
-            ),
-          ),
-          const Divider(height: 40),
-          const Text(
             "Zeitstatistik",
             style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
           ),

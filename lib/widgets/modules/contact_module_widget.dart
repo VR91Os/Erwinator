@@ -1,3 +1,5 @@
+import 'package:android_intent_plus/android_intent.dart';
+import 'package:android_intent_plus/flag.dart';
 import 'package:flutter/foundation.dart' show kIsWeb, defaultTargetPlatform;
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
@@ -273,31 +275,52 @@ class ContactModuleWidget extends StatelessWidget {
       (defaultTargetPlatform == TargetPlatform.android ||
           defaultTargetPlatform == TargetPlatform.iOS);
 
-  // Öffnet direkt die Gmail-App. Android: googlegmail:// wird von der
-  // Gmail-App dort nicht registriert (nur iOS) - stattdessen ein expliziter
-  // Intent auf das Gmail-Package (funktioniert wie ein Tap auf das
-  // App-Icon, unabhängig von Custom-URL-Schemes). Ist Gmail nicht
-  // installiert, fällt es auf die Standard-Mail-App des Geräts zurück.
+  // Öffnet direkt die Gmail-App. Android: über ein natives Intent-Objekt
+  // (android_intent_plus) mit explizitem Package - url_launcher kann das
+  // NICHT: sein Android-Code baut aus jeder übergebenen URL immer nur ein
+  // simples ACTION_VIEW-Intent per setData(Uri.parse(url)) (siehe
+  // UrlLauncher.java im Plugin), ohne je Intent.parseUri() aufzurufen. Ein
+  // "intent://...#Intent;...;end"-String (das "Chrome Intents"-Format, wie
+  // hier vorher versucht) wird von Android darüber NIE als Intent
+  // interpretiert - das Zielpaket öffnet sich nie, unabhängig von der
+  // genauen URI-Syntax. android_intent_plus baut dagegen ein echtes
+  // Intent-Objekt (Action + Category + Package), genau wie ein Tap auf das
+  // App-Icon. Ist Gmail nicht installiert, fällt es auf die Standard-Mail-
+  // App des Geräts zurück. iOS: googlegmail:// wird dort tatsächlich als
+  // Custom-URL-Scheme von der Gmail-App registriert, das funktioniert über
+  // den normalen URL-Launcher.
+  //
+  // FLAG_ACTIVITY_NEW_TASK ist hier Pflicht, kein optionales Detail: ohne
+  // das Flag hängt sich Gmails Activity, wenn sie ohne eigenen neuen Task
+  // gestartet wird, an den BESTEHENDEN Task von Erwinator (unserer eigenen
+  // Activity) an, statt einen eigenen zu bekommen - für den Nutzer sah das
+  // dann so aus, als würde "Gmail in Erwinator laufen", und Zurück brachte
+  // ihn nicht mehr in die App zurück (musste sie neu starten). Mit dem
+  // Flag bekommt Gmail garantiert einen eigenen, unabhängigen Task -
+  // Erwinators eigener Task/Activity bleibt davon unberührt im
+  // Hintergrund, Zurückkehren läuft über den App-Wechsler.
   Future<void> _openGmail(BuildContext context) async {
-    // "intent:" statt "intent://": Mit "//" würde die URI eine Authority
-    // (Host) VOR "#Intent;" erwarten - ohne Host/Pfad dazwischen scheitert
-    // Intent.parseUri auf manchen Android-Versionen am Parsen, und der
-    // Aufruf fällt dann still auf die mailto:-Alternative unten zurück,
-    // statt Gmail zu öffnen.
-    final gmailUri = defaultTargetPlatform == TargetPlatform.android
-        ? Uri.parse(
-            'intent:#Intent;package=com.google.android.gm;'
-            'action=android.intent.action.MAIN;'
-            'category=android.intent.category.LAUNCHER;end')
-        : Uri.parse('googlegmail://');
-    final launched = await launchUrl(gmailUri);
-    if (!launched) {
-      final fallback = await launchUrl(Uri.parse('mailto:'));
-      if (!fallback && context.mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text("Gmail konnte nicht geöffnet werden.")),
-        );
+    if (defaultTargetPlatform == TargetPlatform.android) {
+      const gmailIntent = AndroidIntent(
+        action: 'android.intent.action.MAIN',
+        category: 'android.intent.category.LAUNCHER',
+        package: 'com.google.android.gm',
+        flags: [Flag.FLAG_ACTIVITY_NEW_TASK],
+      );
+      final resolvable = await gmailIntent.canResolveActivity() ?? false;
+      if (resolvable) {
+        await gmailIntent.launch();
+        return;
       }
+    } else {
+      final launched = await launchUrl(Uri.parse('googlegmail://'));
+      if (launched) return;
+    }
+    final fallback = await launchUrl(Uri.parse('mailto:'));
+    if (!fallback && context.mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text("Gmail konnte nicht geöffnet werden.")),
+      );
     }
   }
 

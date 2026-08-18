@@ -1379,6 +1379,114 @@ class ProjectStore extends ChangeNotifier {
     await _persist(projectId);
   }
 
+  // "Manuell Zeit hinzufügen": wie applyWorkTimeProfile, aber ohne
+  // gespeichertes Arbeitszeitprofil - Zeitraum (von/bis/Pause) und
+  // Personenzahl kommen direkt aus dem Dialog, [days] ist eine frei per
+  // Kalender ausgewählte (nicht zwingend zusammenhängende) Tagesmenge statt
+  // eines [from, to]-Bereichs. ADDIERT die daraus berechnete
+  // Personenzahl×Stunden-Menge zu jedem gewählten Tag dazu, analog additiv
+  // wie applyWorkTimeProfile.
+  Future<void> addManualTimeEntry(
+    String projectId, {
+    required Set<DateTime> days,
+    required String startTime,
+    required String endTime,
+    required int breakMinutes,
+    required int personCount,
+    required String actor,
+  }) async {
+    final project = _project(projectId);
+    if (project == null) return;
+    final schedule = WeekdaySchedule(
+      weekday: 1,
+      startTime: startTime,
+      endTime: endTime,
+      breakMinutes: breakMinutes,
+    );
+    final perPersonHours = schedule.hours;
+    if (perPersonHours <= 0 || personCount <= 0 || days.isEmpty) return;
+    final totalHours = perPersonHours * personCount;
+    final personLabel = personCount == 1 ? '1 Person' : '$personCount Personen';
+    final byDate = <DateTime, WorkDayEntry>{
+      for (final e in project.workDayEntries) _dateOnly(e.date): e,
+    };
+    for (final day in days) {
+      final dateOnly = _dateOnly(day);
+      final auditEntry = AuditEntry(
+        kurzzeichen: actor,
+        action: 'Manuell erfasst: $startTime–$endTime, $personLabel '
+            '(+${totalHours}h)',
+      );
+      final existing = byDate[dateOnly];
+      if (existing != null) {
+        existing.hourContributions.add(HourContribution(
+          id: 'hourcontrib:manualtime:${newId()}',
+          amount: totalHours,
+        ));
+        existing.updatedAt = DateTime.now();
+        existing.history.add(auditEntry);
+      } else {
+        final entry = WorkDayEntry(
+          id: newId(),
+          date: dateOnly,
+          hourContributions: [
+            HourContribution(
+              id: 'hourcontrib:manualtime:${newId()}',
+              amount: totalHours,
+            ),
+          ],
+          history: [auditEntry],
+        );
+        project.workDayEntries.add(entry);
+        byDate[dateOnly] = entry;
+      }
+    }
+    notifyListeners();
+    await _persist(projectId);
+  }
+
+  // "Manuell Stunden hinzufügen": simpler Schnell-Zugang ohne Zeitraum/
+  // Personenzahl - addiert direkt eine eingegebene Stundenzahl zu HEUTE
+  // dazu, optional mit einer Notiz (landet im Verlauf, da HourContribution
+  // selbst kein eigenes Notizfeld hat).
+  Future<void> addQuickHourEntry(
+    String projectId, {
+    required double hours,
+    String? note,
+    required String actor,
+  }) async {
+    final project = _project(projectId);
+    if (project == null || hours <= 0) return;
+    final today = _dateOnly(DateTime.now());
+    WorkDayEntry? entry;
+    for (final e in project.workDayEntries) {
+      if (e.date.isAtSameMomentAs(today)) entry = e;
+    }
+    final trimmedNote = note?.trim() ?? '';
+    final action = trimmedNote.isEmpty
+        ? 'Manuell Stunden hinzugefügt (+${hours}h)'
+        : 'Manuell Stunden hinzugefügt (+${hours}h): $trimmedNote';
+    final auditEntry = AuditEntry(kurzzeichen: actor, action: action);
+    final contribution = HourContribution(
+      id: 'hourcontrib:manualhours:${newId()}',
+      amount: hours,
+    );
+    if (entry != null) {
+      entry.hourContributions.add(contribution);
+      entry.updatedAt = DateTime.now();
+      entry.history.add(auditEntry);
+    } else {
+      project.workDayEntries.add(WorkDayEntry(
+        id: newId(),
+        date: today,
+        hourContributions: [contribution],
+        history: [auditEntry],
+      ));
+    }
+    notifyListeners();
+    await _persist(projectId);
+  }
+
   // Manuelle Korrektur eines bereits erfassten Tages im Zeitstatistik-
   // Kalender: setzt die Stunden direkt (im Gegensatz zu den additiven
   // Erfassungswegen oben) auf den angegebenen Wert, um z.B. eine

@@ -96,6 +96,8 @@ class _GewerkeScreenState extends State<GewerkeScreen> {
     final isFixedTab = isOverview || isFileArchive || isTimeTracking || isFinanceOverview;
     final selectedGewerk = isFixedTab ? null : project.gewerke[selectedGewerkIndex];
 
+    final tabs = _orderedTabs(project);
+
     final tabStillValid = selectedTabId == _overviewTabId ||
         selectedTabId == _fileArchiveTabId ||
         isTimeTracking ||
@@ -164,26 +166,33 @@ class _GewerkeScreenState extends State<GewerkeScreen> {
         children: [
           SizedBox(
             height: 60,
-            child: _buildTabBar(context, store, project, isFileArchive,
+            child: _buildTabBar(context, store, project, tabs, isFileArchive,
                 isTimeTracking, isFinanceOverview),
           ),
           Expanded(
-            child: Padding(
-              padding: const EdgeInsets.all(16),
-              child: isOverview
-                  ? OverviewTab(project: project)
-                  : isFileArchive
-                      ? FileArchiveTab(
-                          project: project,
-                          onOpenGewerk: (gewerkId) =>
-                              setState(() => selectedTabId = gewerkId),
-                        )
-                      : isTimeTracking
-                          ? TimeTrackingSection(project: project)
-                          : isFinanceOverview
-                              ? FinanceOverviewSection(project: project)
-                              : _buildGewerkContent(
-                                  store, project, selectedGewerk!),
+            // ✅ Rechts/links wischen wechselt zum vorherigen/nächsten Reiter
+            // in der aktuellen (frei sortierbaren) Reihenfolge - ergänzt die
+            // Reiter-Leiste oben, ersetzt sie nicht.
+            child: GestureDetector(
+              onHorizontalDragEnd: (details) =>
+                  _handleTabSwipe(tabs, details),
+              child: Padding(
+                padding: const EdgeInsets.all(16),
+                child: isOverview
+                    ? OverviewTab(project: project)
+                    : isFileArchive
+                        ? FileArchiveTab(
+                            project: project,
+                            onOpenGewerk: (gewerkId) =>
+                                setState(() => selectedTabId = gewerkId),
+                          )
+                        : isTimeTracking
+                            ? TimeTrackingSection(project: project)
+                            : isFinanceOverview
+                                ? FinanceOverviewSection(project: project)
+                                : _buildGewerkContent(
+                                    store, project, selectedGewerk!),
+              ),
             ),
           ),
         ],
@@ -191,19 +200,13 @@ class _GewerkeScreenState extends State<GewerkeScreen> {
     );
   }
 
-  // ✅ Frei per Drag&Drop sortierbare Reiter-Leiste: Reihenfolge kommt aus
-  // project.tabOrder (IDs), neue/entfernte Reiter (neues Gewerk, gerade
-  // aktiviertes Zeitstatistik-/Finanzen-Modul, gelöschtes Gewerk) werden
-  // automatisch ergänzt bzw. herausgefiltert, ohne die gespeicherte
-  // Reihenfolge der übrigen Reiter zu verändern.
-  Widget _buildTabBar(
-    BuildContext context,
-    ProjectStore store,
-    Project project,
-    bool isFileArchive,
-    bool isTimeTracking,
-    bool isFinanceOverview,
-  ) {
+  // ✅ Reihenfolge kommt aus project.tabOrder (IDs), neue/entfernte Reiter
+  // (neues Gewerk, gerade aktiviertes Zeitstatistik-/Finanzen-Modul,
+  // gelöschtes Gewerk) werden automatisch ergänzt bzw. herausgefiltert,
+  // ohne die gespeicherte Reihenfolge der übrigen Reiter zu verändern.
+  // Gemeinsam von der Reiter-Leiste (_buildTabBar) und der Wisch-Geste
+  // (_handleTabSwipe) genutzt, damit beide dieselbe Reihenfolge sehen.
+  List<_TabDef> _orderedTabs(Project project) {
     final defaultTabs = <_TabDef>[
       _TabDef(
         id: _overviewTabId,
@@ -235,7 +238,35 @@ class _GewerkeScreenState extends State<GewerkeScreen> {
     for (final t in defaultTabs) {
       if (byId.containsKey(t.id)) tabs.add(t);
     }
+    return tabs;
+  }
 
+  // Reagiert nur auf eindeutig zügige Wisch-Gesten (Mindestgeschwindigkeit),
+  // damit ein normales Scrollen/Ziehen innerhalb des Reiter-Inhalts (z.B.
+  // im Kalender der Zeitstatistik) nicht versehentlich als Reiter-Wechsel
+  // interpretiert wird.
+  void _handleTabSwipe(List<_TabDef> tabs, DragEndDetails details) {
+    final velocity = details.primaryVelocity ?? 0;
+    if (velocity.abs() < 300) return;
+    final currentIndex = tabs.indexWhere((t) => t.id == selectedTabId);
+    if (currentIndex == -1) return;
+    // Nach links wischen (negative Velocity) -> nächster Reiter, nach
+    // rechts wischen (positive Velocity) -> vorheriger Reiter.
+    final newIndex = velocity < 0 ? currentIndex + 1 : currentIndex - 1;
+    if (newIndex < 0 || newIndex >= tabs.length) return;
+    setState(() => selectedTabId = tabs[newIndex].id);
+  }
+
+  // ✅ Frei per Drag&Drop sortierbare Reiter-Leiste.
+  Widget _buildTabBar(
+    BuildContext context,
+    ProjectStore store,
+    Project project,
+    List<_TabDef> tabs,
+    bool isFileArchive,
+    bool isTimeTracking,
+    bool isFinanceOverview,
+  ) {
     return ReorderableListView.builder(
       scrollDirection: Axis.horizontal,
       buildDefaultDragHandles: false,

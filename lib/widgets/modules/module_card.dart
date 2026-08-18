@@ -103,40 +103,72 @@ class ModuleCard extends StatelessWidget {
     // eigene, leicht vergessene Farbkorrektur. Gleiche Werte wie das
     // App-weite Hell-Theme in main.dart, damit Buttons/Eingaben auf der
     // Karte unabhängig vom aktuellen App-Design konsistent aussehen.
+    //
+    // textTheme.apply(...) UND colorScheme-Override zusätzlich nötig:
+    // Material 3 leitet aus primarySwatch: Colors.grey ein Farbschema mit
+    // einem gedämpften, gräulichen statt kräftigem Schwarz für
+    // onSurface/Textfarben ab - auf der ohnehin schon eher blassen Karte
+    // wirkte der Modul-Text dadurch zu hell/verwaschen statt schwarz.
+    // textTheme.apply() reicht allein NICHT: einige M3-Widgets (z.B.
+    // ListTile/CheckboxListTile) leiten ihre Standard-Textfarbe direkt aus
+    // colorScheme.onSurface statt aus dem TextTheme ab.
+    final lightModuleTheme =
+        ThemeData(primarySwatch: Colors.grey, brightness: Brightness.light);
     return Theme(
-      data: ThemeData(primarySwatch: Colors.grey, brightness: Brightness.light),
-      child: Container(
-        padding: const EdgeInsets.all(12),
-        decoration: BoxDecoration(
-          color: Colors.white,
-          border: Border.all(color: Colors.grey.shade300),
-          borderRadius: BorderRadius.circular(10),
+      data: lightModuleTheme.copyWith(
+        colorScheme: lightModuleTheme.colorScheme.copyWith(
+          onSurface: Colors.black87,
+          onSurfaceVariant: Colors.black87,
         ),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Row(
-              children: [
-                Expanded(
-                  child: Text(
-                    title,
-                    style: const TextStyle(fontWeight: FontWeight.bold),
+        textTheme: lightModuleTheme.textTheme.apply(
+          bodyColor: Colors.black87,
+          displayColor: Colors.black87,
+        ),
+      ),
+      // Ohne dieses Material bleibt der Theme-Override oben für einfache
+      // Text-Widgets (z.B. die Modul-Überschrift direkt unten) wirkungslos:
+      // deren Standardfarbe kommt aus dem ambienten DefaultTextStyle, das
+      // vom NÄCHSTEN Material-Vorfahren gesetzt wird - ohne ein eigenes
+      // Material HIER bleibt das der äußere, dunkelmodus-abhängige Scaffold
+      // weiter oben im Baum, unser Theme-Override wird also nie neu
+      // ausgewertet. Widgets mit eigener Theme.of(context)-Abfrage (z.B.
+      // CheckboxListTile) waren davon nicht betroffen, deshalb fiel es nur
+      // bei der Überschrift auf.
+      child: Material(
+        type: MaterialType.transparency,
+        child: Container(
+          padding: const EdgeInsets.all(12),
+          decoration: BoxDecoration(
+            color: Colors.white,
+            border: Border.all(color: Colors.grey.shade300),
+            borderRadius: BorderRadius.circular(10),
+          ),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Row(
+                children: [
+                  Expanded(
+                    child: Text(
+                      title,
+                      style: const TextStyle(fontWeight: FontWeight.bold),
+                    ),
                   ),
-                ),
-                IconButton(
-                  icon: const Icon(Icons.edit_outlined, size: 20),
-                  tooltip: "Modul umbenennen",
-                  onPressed: () => _showRenameDialog(context),
-                ),
-                IconButton(
-                  icon: const Icon(Icons.delete_outline, size: 20),
-                  tooltip: "Modul entfernen",
-                  onPressed: () => _confirmDelete(context),
-                ),
-              ],
-            ),
-            child,
-          ],
+                  IconButton(
+                    icon: const Icon(Icons.edit_outlined, size: 20),
+                    tooltip: "Modul umbenennen",
+                    onPressed: () => _showRenameDialog(context),
+                  ),
+                  IconButton(
+                    icon: const Icon(Icons.delete_outline, size: 20),
+                    tooltip: "Modul entfernen",
+                    onPressed: () => _confirmDelete(context),
+                  ),
+                ],
+              ),
+              child,
+            ],
+          ),
         ),
       ),
     );

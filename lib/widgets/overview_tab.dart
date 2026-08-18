@@ -198,6 +198,8 @@ class _OverviewTabState extends State<OverviewTab> {
           style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
         ),
         TableCalendar(
+          locale: 'de_DE',
+          startingDayOfWeek: StartingDayOfWeek.monday,
           firstDay: DateTime.now().subtract(const Duration(days: 365)),
           lastDay: DateTime.now().add(const Duration(days: 365)),
           focusedDay: focusedDay,
