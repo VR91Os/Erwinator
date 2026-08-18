@@ -15,12 +15,6 @@ import '../../utils/name_capitalization.dart';
 import '../audit_info_icon.dart';
 import 'module_card.dart';
 
-// Telefonnummern: nur Ziffern plus die im Alltag üblichen
-// Formatierungszeichen (+, Leerzeichen, Klammern, Bindestrich, Schrägstrich)
-// - keine Buchstaben.
-final _phoneInputFormatter =
-    FilteringTextInputFormatter.allow(RegExp(r'[0-9+\-\s()/]'));
-
 // Entfernt versehentlich mitgetippte/eingefügte Leerzeichen aus einer
 // Email-Adresse (z.B. beim Copy-Paste aus einer PDF).
 String _stripEmailSpaces(String value) => value.replaceAll(RegExp(r'\s+'), '');
@@ -437,8 +431,6 @@ class _ContactPersonTile extends StatefulWidget {
 }
 
 class _ContactPersonTileState extends State<_ContactPersonTile> {
-  late final _phoneController =
-      TextEditingController(text: widget.person.phone);
   late final _emailController =
       TextEditingController(text: widget.person.email);
 
@@ -447,13 +439,9 @@ class _ContactPersonTileState extends State<_ContactPersonTile> {
     super.didUpdateWidget(oldWidget);
     // Mit einem stabilen Key (siehe Aufrufstelle) bleibt dieses State-Objekt
     // über Rebuilds hinweg derselben Person zugeordnet - ändert sich ihre
-    // Telefonnummer/Email extern (z.B. Sync-Merge von einem anderen Gerät),
-    // muss das Feld trotzdem nachgezogen werden, sonst zeigt es den
-    // veralteten Wert, obwohl der Nutzer gerade nichts eingibt.
-    if (oldWidget.person.phone != widget.person.phone &&
-        _phoneController.text != widget.person.phone) {
-      _phoneController.text = widget.person.phone;
-    }
+    // Email extern (z.B. Sync-Merge von einem anderen Gerät), muss das Feld
+    // trotzdem nachgezogen werden, sonst zeigt es den veralteten Wert,
+    // obwohl der Nutzer gerade nichts eingibt.
     if (oldWidget.person.email != widget.person.email &&
         _emailController.text != widget.person.email) {
       _emailController.text = widget.person.email;
@@ -462,7 +450,6 @@ class _ContactPersonTileState extends State<_ContactPersonTile> {
 
   @override
   void dispose() {
-    _phoneController.dispose();
     _emailController.dispose();
     super.dispose();
   }
@@ -477,7 +464,6 @@ class _ContactPersonTileState extends State<_ContactPersonTile> {
     final actor = widget.actor;
     final onCall = widget.onCall;
     final onWhatsApp = widget.onWhatsApp;
-    final phoneController = _phoneController;
     final hasPhone = person.phone.trim().isNotEmpty;
 
     return Container(
@@ -517,21 +503,6 @@ class _ContactPersonTileState extends State<_ContactPersonTile> {
                 ),
               ),
             ],
-          ),
-          TextFormField(
-            controller: phoneController,
-            decoration: const InputDecoration(labelText: "Telefonnummer"),
-            keyboardType: TextInputType.phone,
-            inputFormatters: [_phoneInputFormatter],
-            onFieldSubmitted: (value) => store.updateContactPerson(
-              projectId,
-              gewerkId,
-              module.id,
-              person.id,
-              name: person.name,
-              phone: value,
-              actor: actor,
-            ),
           ),
           if (widget.showContactEmail)
             Padding(
