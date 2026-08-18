@@ -219,17 +219,26 @@ class ContactModuleWidget extends StatelessWidget {
                   final proceed = await _confirmSaveInvalidEmail(dialogContext);
                   if (!proceed) return;
                 }
-                for (final name in names) {
-                  store.addContactPerson(
-                    projectId,
-                    gewerkId,
-                    module.id,
-                    name: name,
-                    email: email,
-                    actor: actor,
-                  );
-                }
                 if (dialogContext.mounted) Navigator.pop(dialogContext);
+                // Erst nach dem aktuellen Frame speichern (siehe
+                // time_tracking_section.dart _showManualTimeDialog): die
+                // store.addContactPerson-Aufrufe lösen über notifyListeners()
+                // einen Provider-weiten Rebuild aus - passiert das noch
+                // synchron, während Navigator.pop den Dialog gerade abbaut,
+                // kollidiert das mit dessen Element-Abbau
+                // ("_dependents.isEmpty"-Assertion).
+                WidgetsBinding.instance.addPostFrameCallback((_) {
+                  for (final name in names) {
+                    store.addContactPerson(
+                      projectId,
+                      gewerkId,
+                      module.id,
+                      name: name,
+                      email: email,
+                      actor: actor,
+                    );
+                  }
+                });
               },
               child: const Text("Hinzufügen"),
             ),
