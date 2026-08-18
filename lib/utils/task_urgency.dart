@@ -28,7 +28,13 @@ bool projectHasUrgentPriorityTask(Project project) {
       .any((g) => gewerkHasUrgentPriorityTask(g, project.priorityWarningDays));
 }
 
-Color taskUrgencyColor(Task task) {
+// Prio-Warnfarbe (hellorange): [warningDays] ist dieselbe projektweit
+// eingestellte Warnschwelle wie bei gewerkHasUrgentPriorityTask oben, damit
+// Kartenfarbe und Reiter-/Push-Warnung konsistent an derselben Schwelle
+// umschlagen statt an einem eigenen, fest codierten Wert.
+final Color prioWarningColor = Colors.orange.shade200;
+
+Color taskUrgencyColor(Task task, {required int warningDays}) {
   if (task.status == "erledigt") {
     return Colors.green.shade200;
   }
@@ -40,11 +46,8 @@ Color taskUrgencyColor(Task task) {
   }
   if (task.status == "offen" && task.isHighPriority && task.dueDate != null) {
     final diff = task.dueDate!.difference(DateTime.now()).inDays;
-    if (diff <= 1) {
-      return const Color(0xFFFFD6D6); // kritisch
-    }
-    if (diff <= 3) {
-      return const Color(0xFFFFF3CD); // bald
+    if (diff <= warningDays) {
+      return prioWarningColor;
     }
   }
   return Colors.white;

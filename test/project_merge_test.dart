@@ -215,7 +215,16 @@ void main() {
       final entry = WorkDayEntry(
         id: 'day1',
         date: DateTime(2026, 3, 2),
-        hours: 8,
+        hourContributions: [
+          HourContribution(
+              id: 'hourcontrib:helper:day1:Anna',
+              amount: 4,
+              updatedAt: DateTime(2026, 3, 2)),
+          HourContribution(
+              id: 'hourcontrib:helper:day1:Ben',
+              amount: 4,
+              updatedAt: DateTime(2026, 3, 2)),
+        ],
         helperNames: [
           PresenceEntry('Anna', updatedAt: DateTime(2026, 3, 2)),
           PresenceEntry('Ben', updatedAt: DateTime(2026, 3, 2)),
@@ -225,22 +234,34 @@ void main() {
       final local = Project('p1', 'Testprojekt', workDayEntries: [entry]);
       final remote = Project.fromMap(local.toMap());
 
-      // Lokal: Ben wird aus dem Tag entfernt (Tombstone + neuer Zeitstempel,
-      // wie in ProjectStore.removeHelperSignup).
+      // Lokal: Ben wird aus dem Tag entfernt (Tombstones für Namensliste UND
+      // Stunden-Beitrag + neuer Zeitstempel, wie in
+      // ProjectStore.removeHelperSignup).
       final localEntry = local.workDayEntries.first;
       localEntry.helperNames.removeWhere((p) => p.person == 'Ben');
+      localEntry.hourContributions
+          .removeWhere((c) => c.id == 'hourcontrib:helper:day1:Ben');
       local.deletedIds['helper:day1:Ben'] = DateTime(2026, 3, 3);
+      local.deletedIds['hourcontrib:helper:day1:Ben'] = DateTime(2026, 3, 3);
       localEntry.updatedAt = DateTime(2026, 3, 3);
 
-      // Remote: nur die Stunden desselben Tages geändert, neuerer
-      // Zeitstempel als lokal -> gewinnt beim Stunden-Feld.
+      // Remote: unabhängig ein weiterer, eigener Stunden-Beitrag desselben
+      // Tages hinzugekommen (z.B. ein manuell angewendetes Profil) - additiv,
+      // darf beim Merge NICHT die verbleibenden Beiträge überschreiben.
       final remoteEntry = remote.workDayEntries.first;
-      remoteEntry.hours = 6;
+      remoteEntry.hourContributions.add(HourContribution(
+        id: 'hourcontrib:profile:remote1',
+        amount: 2,
+        updatedAt: DateTime(2026, 3, 4),
+      ));
       remoteEntry.updatedAt = DateTime(2026, 3, 4);
 
       final merged = local.mergeFrom(remote);
       final mergedEntry = merged.workDayEntries.first;
-      expect(mergedEntry.hours, 6); // remote gewinnt beim Stunden-Feld
+      // Annas ursprünglicher Beitrag (4h) + remotes neuer Beitrag (2h) -
+      // Bens getombstoneter Beitrag bleibt draußen, statt durch remotes
+      // "gewinnt komplett"-Kopie zurückgeholt zu werden.
+      expect(mergedEntry.hours, 6);
       expect(mergedEntry.helperNames.map((p) => p.person), ['Anna']);
     });
 

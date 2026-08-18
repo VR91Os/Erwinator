@@ -56,6 +56,17 @@ void main() {
   });
 }
 
+ThemeMode _themeModeFrom(String value) {
+  switch (value) {
+    case 'light':
+      return ThemeMode.light;
+    case 'dark':
+      return ThemeMode.dark;
+    default:
+      return ThemeMode.system;
+  }
+}
+
 class BaustellenApp extends StatelessWidget {
   const BaustellenApp({super.key});
 
@@ -68,12 +79,35 @@ class BaustellenApp extends StatelessWidget {
         ChangeNotifierProvider(create: (_) => DocumentationStore()..init()),
         ChangeNotifierProvider.value(value: ErrorLogService.instance),
       ],
-      child: MaterialApp(
-        title: 'Erwinator',
-        theme: ThemeData(
-          primarySwatch: Colors.grey,
+      // ✅ Eigener Consumer statt MaterialApp direkt hier zu bauen: der
+      // MultiProvider muss erst im Baum existieren, bevor SettingsStore
+      // (für die Design-Einstellung, siehe overview_settings_screen.dart)
+      // aus demselben context lesbar ist.
+      child: Consumer<SettingsStore>(
+        builder: (context, settingsStore, _) => MaterialApp(
+          title: 'Erwinator',
+          theme: ThemeData(
+            primarySwatch: Colors.grey,
+            brightness: Brightness.light,
+          ),
+          darkTheme: ThemeData(
+            primarySwatch: Colors.grey,
+            brightness: Brightness.dark,
+          ),
+          themeMode: _themeModeFrom(settingsStore.settings.themeMode),
+          // ✅ App läuft edge-to-edge (Inhalt kann hinter die System-Leiste
+          // für Zurück/Home unten reichen) - ohne das hier würde jeder
+          // einzelne Screen selbst dafür sorgen müssen, dass sein unterster
+          // Button/Inhalt nicht in diesem unantippbaren Bereich landet. Nur
+          // "bottom", damit oben nicht doppelt gepolstert wird (die AppBar
+          // jedes Screens kümmert sich dort schon selbst um den
+          // Status-Balken).
+          builder: (context, child) => SafeArea(
+            top: false,
+            child: child ?? const SizedBox.shrink(),
+          ),
+          home: const StartScreen(),
         ),
-        home: const StartScreen(),
       ),
     );
   }

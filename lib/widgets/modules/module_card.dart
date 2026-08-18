@@ -96,38 +96,48 @@ class ModuleCard extends StatelessWidget {
   Widget build(BuildContext context) {
     final title = "$icon ${label.isEmpty ? defaultTitle : label}";
 
-    return Container(
-      padding: const EdgeInsets.all(12),
-      decoration: BoxDecoration(
-        color: Colors.white,
-        border: Border.all(color: Colors.grey.shade300),
-        borderRadius: BorderRadius.circular(10),
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Row(
-            children: [
-              Expanded(
-                child: Text(
-                  title,
-                  style: const TextStyle(fontWeight: FontWeight.bold),
+    // Die Karte bleibt bewusst immer hell, unabhängig vom Dunkelmodus.
+    // Theme-Override für den ganzen Karten-Inhalt statt einzelne Text-/
+    // Eingabefelder manuell einzufärben - sonst bräuchte JEDES verschachtelte
+    // Widget (z.B. die Telefon-/Email-Felder in ContactModuleWidget) eine
+    // eigene, leicht vergessene Farbkorrektur. Gleiche Werte wie das
+    // App-weite Hell-Theme in main.dart, damit Buttons/Eingaben auf der
+    // Karte unabhängig vom aktuellen App-Design konsistent aussehen.
+    return Theme(
+      data: ThemeData(primarySwatch: Colors.grey, brightness: Brightness.light),
+      child: Container(
+        padding: const EdgeInsets.all(12),
+        decoration: BoxDecoration(
+          color: Colors.white,
+          border: Border.all(color: Colors.grey.shade300),
+          borderRadius: BorderRadius.circular(10),
+        ),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(
+              children: [
+                Expanded(
+                  child: Text(
+                    title,
+                    style: const TextStyle(fontWeight: FontWeight.bold),
+                  ),
                 ),
-              ),
-              IconButton(
-                icon: const Icon(Icons.edit_outlined, size: 20),
-                tooltip: "Modul umbenennen",
-                onPressed: () => _showRenameDialog(context),
-              ),
-              IconButton(
-                icon: const Icon(Icons.delete_outline, size: 20),
-                tooltip: "Modul entfernen",
-                onPressed: () => _confirmDelete(context),
-              ),
-            ],
-          ),
-          child,
-        ],
+                IconButton(
+                  icon: const Icon(Icons.edit_outlined, size: 20),
+                  tooltip: "Modul umbenennen",
+                  onPressed: () => _showRenameDialog(context),
+                ),
+                IconButton(
+                  icon: const Icon(Icons.delete_outline, size: 20),
+                  tooltip: "Modul entfernen",
+                  onPressed: () => _confirmDelete(context),
+                ),
+              ],
+            ),
+            child,
+          ],
+        ),
       ),
     );
   }

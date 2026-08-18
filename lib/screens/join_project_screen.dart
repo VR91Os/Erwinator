@@ -7,6 +7,7 @@ import '../services/sharing_service.dart';
 import '../state/project_store.dart';
 import '../state/settings_store.dart';
 import '../widgets/app_bar.dart';
+import 'qr_scan_screen.dart';
 
 // Für die eingeladene Person: Einladungscode + Name eingeben, Anfrage
 // senden, warten bis der Ersteller bestätigt (live), danach wird das
@@ -34,6 +35,16 @@ class _JoinProjectScreenState extends State<JoinProjectScreen> {
     final subscription = _subscription;
     if (subscription != null) _sharingService.unsubscribe(subscription);
     super.dispose();
+  }
+
+  Future<void> _scanQrCode() async {
+    final scanned = await Navigator.push<String>(
+      context,
+      MaterialPageRoute(builder: (context) => const QrScanScreen()),
+    );
+    if (scanned != null && scanned.isNotEmpty) {
+      _codeController.text = scanned;
+    }
   }
 
   Future<void> _submit() async {
@@ -120,10 +131,14 @@ class _JoinProjectScreenState extends State<JoinProjectScreen> {
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
                   const Text(
-                    "Einladungscode eintragen (oder den QR-Code mit der "
-                    "Kamera-App scannen, dann den angezeigten Code hier "
-                    "eintippen).",
+                    "Einladungscode eintragen oder QR-Code scannen.",
                     style: TextStyle(color: Colors.grey),
+                  ),
+                  const SizedBox(height: 12),
+                  OutlinedButton.icon(
+                    onPressed: _scanQrCode,
+                    icon: const Icon(Icons.qr_code_scanner),
+                    label: const Text("QR-Code scannen"),
                   ),
                   const SizedBox(height: 16),
                   TextField(

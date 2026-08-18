@@ -535,8 +535,9 @@ class FileModuleWidget extends StatelessWidget {
     );
   }
 
-  // Fragt nach einem Namen für die Datei; "Überspringen" übernimmt den
-  // tatsächlichen Dateinamen unverändert.
+  // Fragt nach einem Namen für die Datei; das Feld ist mit dem
+  // tatsächlichen Dateinamen vorbefüllt, "Speichern" ohne Änderung
+  // übernimmt ihn also unverändert.
   void _showNameDialog(
     BuildContext context,
     String suggestedName,
@@ -589,21 +590,6 @@ class FileModuleWidget extends StatelessWidget {
                 TextButton(
                   onPressed: () => Navigator.pop(dialogContext),
                   child: const Text("Abbrechen"),
-                ),
-                TextButton(
-                  onPressed: () {
-                    Navigator.pop(dialogContext);
-                    _addEntry(
-                      context,
-                      name: suggestedName,
-                      fileType: fileType,
-                      extension: extension,
-                      sourcePath: sourcePath,
-                      bytes: bytes,
-                      saveToDocumentation: saveToDocumentation,
-                    );
-                  },
-                  child: const Text("Überspringen"),
                 ),
                 ElevatedButton(
                   onPressed: () {

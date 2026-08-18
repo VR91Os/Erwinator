@@ -28,6 +28,8 @@
 	<true/>
 	<key>NSContactsUsageDescription</key>
 	<string>Wird benötigt, um Kontakte aus dem Telefonbuch in ein Kontakt-Modul zu übernehmen.</string>
+	<key>NSCameraUsageDescription</key>
+	<string>Wird benötigt, um den Einladungs-QR-Code beim Projekt-Beitreten zu scannen.</string>
 	<key>LSApplicationQueriesSchemes</key>
 	<array>
 		<string>googlegmail</string>

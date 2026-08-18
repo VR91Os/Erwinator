@@ -7,6 +7,7 @@ import '../models/time_tracking.dart';
 import '../screens/time_profiles_screen.dart';
 import '../state/project_store.dart';
 import '../state/settings_store.dart';
+import '../utils/light_surface_colors.dart';
 
 String _formatHours(double hours) {
   final rounded = (hours * 10).round() / 10;
@@ -51,6 +52,8 @@ class _TimeTrackingSectionState extends State<TimeTrackingSection> {
       return Stack(
         alignment: Alignment.center,
         children: [
+          // Hintergrund bleibt Standard (nicht fest hell), daher hier keine
+          // feste Textfarbe nötig - anders als unten (fest teal.shade50).
           Text('${day.day}'),
           Positioned(
             bottom: 2,
@@ -77,7 +80,8 @@ class _TimeTrackingSectionState extends State<TimeTrackingSection> {
       child: Column(
         mainAxisAlignment: MainAxisAlignment.center,
         children: [
-          Text('${day.day}'),
+          Text('${day.day}',
+              style: const TextStyle(color: lightSurfaceTextColor)),
           Text(
             '${_formatHours(entry.hours)}h',
             style: const TextStyle(fontSize: 9, color: Colors.teal),
@@ -85,7 +89,7 @@ class _TimeTrackingSectionState extends State<TimeTrackingSection> {
           if (entry.helperNames.isNotEmpty)
             Text(
               '👥${entry.helperNames.length}',
-              style: const TextStyle(fontSize: 9),
+              style: const TextStyle(fontSize: 9, color: lightSurfaceTextColor),
             ),
         ],
       ),
@@ -194,6 +198,20 @@ class _TimeTrackingSectionState extends State<TimeTrackingSection> {
             });
           },
           calendarBuilders: CalendarBuilders(defaultBuilder: _dayBuilder),
+          // ✅ Gleiche Farbcodierung wie der Kalender im Überblick: Heute =
+          // blau, angeklickt/ausgewählt = lila.
+          calendarStyle: const CalendarStyle(
+            todayDecoration: BoxDecoration(
+              color: Colors.blue,
+              shape: BoxShape.circle,
+            ),
+            todayTextStyle: TextStyle(color: Colors.white),
+            selectedDecoration: BoxDecoration(
+              color: Colors.purple,
+              shape: BoxShape.circle,
+            ),
+            selectedTextStyle: TextStyle(color: Colors.white),
+          ),
         ),
         const Padding(
           padding: EdgeInsets.only(top: 4),

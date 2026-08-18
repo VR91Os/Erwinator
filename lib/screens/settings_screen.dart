@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 
 import '../services/error_log_service.dart';
+import '../state/project_store.dart';
 import '../state/settings_store.dart';
 import '../utils/holidays.dart';
 import '../utils/kurzzeichen.dart';
@@ -36,11 +37,20 @@ class _SettingsScreenState extends State<SettingsScreen> {
     super.dispose();
   }
 
-  void _saveProfile() {
-    context.read<SettingsStore>().updateProfile(
-          userName: _nameController.text.trim(),
-          googleAccountEmail: _googleController.text.trim(),
-        );
+  Future<void> _saveProfile() async {
+    final settingsStore = context.read<SettingsStore>();
+    final projectStore = context.read<ProjectStore>();
+    final oldKurzzeichen = await settingsStore.updateProfile(
+      userName: _nameController.text.trim(),
+      googleAccountEmail: _googleController.text.trim(),
+    );
+    if (oldKurzzeichen != null) {
+      await projectStore.renameKurzzeichenInHistory(
+        oldKurzzeichen,
+        settingsStore.currentUserKurzzeichen,
+      );
+    }
+    if (!mounted) return;
     ScaffoldMessenger.of(context).showSnackBar(
       const SnackBar(content: Text("Gespeichert")),
     );

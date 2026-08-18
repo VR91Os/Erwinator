@@ -60,6 +60,7 @@ class TodoModuleWidget extends StatelessWidget {
         onArchive: () => store.archiveTask(
             projectId, gewerkId, module.id, task.id,
             actor: actor),
+        warningDays: project.priorityWarningDays,
       );
     }
 
@@ -72,6 +73,17 @@ class TodoModuleWidget extends StatelessWidget {
         visibleTasks.add(task);
       }
     }
+    // ✅ Nach Fälligkeit sortiert statt in Erfassungsreihenfolge, damit eine
+    // nachträglich verschobene Fälligkeit die Liste automatisch wieder
+    // richtig einordnet. Aufgaben ohne Datum bleiben hinten.
+    visibleTasks.sort((a, b) {
+      final ad = a.dueDate;
+      final bd = b.dueDate;
+      if (ad == null && bd == null) return 0;
+      if (ad == null) return 1;
+      if (bd == null) return -1;
+      return ad.compareTo(bd);
+    });
 
     return ModuleCard(
       projectId: projectId,

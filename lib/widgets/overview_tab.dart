@@ -8,6 +8,7 @@ import '../models/project.dart';
 import '../models/task.dart';
 import '../state/project_store.dart';
 import '../state/settings_store.dart';
+import '../utils/light_surface_colors.dart';
 import '../utils/name_capitalization.dart';
 import '../utils/task_urgency.dart';
 import '../utils/time_picker_24h.dart';
@@ -76,12 +77,10 @@ class _OverviewTabState extends State<OverviewTab> {
     if (refs.isEmpty) return null;
     Color result = Colors.blue.shade100;
     for (final ref in refs) {
-      final color = taskUrgencyColor(ref.task);
-      if (color == const Color(0xFFFFD6D6)) {
+      final color = taskUrgencyColor(ref.task,
+          warningDays: widget.project.priorityWarningDays);
+      if (color == prioWarningColor) {
         return color;
-      }
-      if (color == const Color(0xFFFFF3CD)) {
-        result = color;
       }
     }
     return result;
@@ -110,11 +109,17 @@ class _OverviewTabState extends State<OverviewTab> {
     if (color == null && demand == null) return null;
 
     final dayNumber = Container(
-      margin: const EdgeInsets.all(4),
+      margin: const EdgeInsets.all(2),
       decoration:
           color == null ? null : BoxDecoration(color: color, shape: BoxShape.circle),
       alignment: Alignment.center,
-      child: Text('${day.day}'),
+      child: Text(
+        '${day.day}',
+        style: TextStyle(
+          fontSize: 13,
+          color: color == null ? null : lightSurfaceTextColor,
+        ),
+      ),
     );
     if (demand == null) return dayNumber;
 
@@ -163,6 +168,7 @@ class _OverviewTabState extends State<OverviewTab> {
       onArchive: () => store.archiveTask(
           widget.project.id, ref.gewerkId, ref.moduleId, ref.task.id,
           actor: actor),
+      warningDays: widget.project.priorityWarningDays,
     );
   }
 
@@ -203,6 +209,38 @@ class _OverviewTabState extends State<OverviewTab> {
             });
           },
           calendarBuilders: CalendarBuilders(defaultBuilder: _dayBuilder),
+          // ✅ Kompakter als der Standard (deutlich weniger Höhe), da der
+          // Kalender im Überblick nur einer von mehreren Abschnitten ist.
+          rowHeight: 38,
+          daysOfWeekHeight: 14,
+          headerStyle: const HeaderStyle(
+            titleTextStyle: TextStyle(fontSize: 15, fontWeight: FontWeight.bold),
+            headerPadding: EdgeInsets.symmetric(vertical: 4),
+            // Ohne calendarFormat/onFormatChanged hier ohnehin wirkungslos.
+            formatButtonVisible: false,
+          ),
+          daysOfWeekStyle: const DaysOfWeekStyle(
+            weekdayStyle: TextStyle(fontSize: 11, color: Colors.grey),
+            weekendStyle: TextStyle(fontSize: 11, color: Colors.grey),
+          ),
+          calendarStyle: CalendarStyle(
+            cellMargin: const EdgeInsets.all(2),
+            defaultTextStyle: const TextStyle(fontSize: 13),
+            weekendTextStyle: const TextStyle(fontSize: 13),
+            outsideTextStyle: TextStyle(fontSize: 13, color: Colors.grey.shade400),
+            // ✅ Heute = blau, angeklickt/ausgewählt = lila - eindeutig
+            // unterscheidbar statt der ähnlichen Blautöne des Paket-Standards.
+            todayDecoration: const BoxDecoration(
+              color: Colors.blue,
+              shape: BoxShape.circle,
+            ),
+            todayTextStyle: const TextStyle(color: Colors.white, fontSize: 13),
+            selectedDecoration: const BoxDecoration(
+              color: Colors.purple,
+              shape: BoxShape.circle,
+            ),
+            selectedTextStyle: const TextStyle(color: Colors.white, fontSize: 13),
+          ),
         ),
         Align(
           alignment: Alignment.centerRight,
@@ -427,10 +465,27 @@ class _OverviewTabState extends State<OverviewTab> {
     final store = context.read<ProjectStore>();
     final actor = context.read<SettingsStore>().currentUserKurzzeichen;
     final nameController = TextEditingController();
-    TimeOfDay? startTime;
-    TimeOfDay? endTime;
+    // ✅ Standard-Zeitraum 07:00-17:00, außer das Zeitstatistik-Modul hat
+    // für diesen Wochentag ein aktives Profil hinterlegt - dann werden
+    // dessen Zeiten übernommen, statt einen abweichenden zweiten
+    // "Standard" zu erfinden.
+    final activeSchedule =
+        widget.project.activeWorkTimeProfile?.scheduleFor(selectedDay.weekday);
+    final usesProfileDefault = activeSchedule != null;
+    TimeOfDay startTime = (usesProfileDefault
+            ? parseTimeOfDay(activeSchedule.startTime)
+            : null) ??
+        const TimeOfDay(hour: 7, minute: 0);
+    TimeOfDay endTime = (usesProfileDefault
+            ? parseTimeOfDay(activeSchedule.endTime)
+            : null) ??
+        const TimeOfDay(hour: 17, minute: 0);
     DateTime from = selectedDay;
     DateTime to = selectedDay;
+    // ✅ Uhrzeit ist nicht immer relevant (z.B. reine Tageszusage ohne
+    // festen Zeitrahmen) - deshalb per Checkbox einblendbar statt immer
+    // erzwungen sichtbar, standardmäßig aus.
+    bool showTime = false;
 
     String formatTime(TimeOfDay time) =>
         '${time.hour.toString().padLeft(2, '0')}:'
@@ -517,46 +572,73 @@ class _OverviewTabState extends State<OverviewTab> {
                         ),
                       ],
                     ),
-                    const SizedBox(height: 10),
-                    Row(
-                      children: [
-                        Expanded(
-                          child: OutlinedButton(
-                            onPressed: () async {
-                              final picked = await show24hTimePicker(
-                                context: context,
-                                initialTime: startTime ??
-                                    const TimeOfDay(hour: 8, minute: 0),
-                              );
-                              if (picked != null) {
-                                setDialogState(() => startTime = picked);
-                              }
-                            },
-                            child: Text(startTime == null
-                                ? "Von…"
-                                : "Von ${formatTime(startTime!)}"),
-                          ),
-                        ),
-                        const SizedBox(width: 8),
-                        Expanded(
-                          child: OutlinedButton(
-                            onPressed: () async {
-                              final picked = await show24hTimePicker(
-                                context: context,
-                                initialTime: endTime ??
-                                    const TimeOfDay(hour: 12, minute: 0),
-                              );
-                              if (picked != null) {
-                                setDialogState(() => endTime = picked);
-                              }
-                            },
-                            child: Text(endTime == null
-                                ? "Bis…"
-                                : "Bis ${formatTime(endTime!)}"),
-                          ),
-                        ),
-                      ],
+                    CheckboxListTile(
+                      contentPadding: EdgeInsets.zero,
+                      controlAffinity: ListTileControlAffinity.leading,
+                      dense: true,
+                      title: const Text("Uhrzeit angeben"),
+                      value: showTime,
+                      onChanged: (value) =>
+                          setDialogState(() => showTime = value ?? false),
                     ),
+                    if (showTime) ...[
+                      Row(
+                        children: [
+                          Expanded(
+                            child: OutlinedButton(
+                              onPressed: () async {
+                                final picked = await show24hTimePicker(
+                                  context: context,
+                                  initialTime: startTime,
+                                );
+                                if (picked == null) return;
+                                setDialogState(() => startTime = picked);
+                                // ✅ Direkt weiter zur Bis-Auswahl, statt
+                                // dafür extra den zweiten Button antippen zu
+                                // müssen.
+                                if (!context.mounted) return;
+                                final pickedEnd = await show24hTimePicker(
+                                  context: context,
+                                  initialTime: endTime,
+                                );
+                                if (pickedEnd != null) {
+                                  setDialogState(() => endTime = pickedEnd);
+                                }
+                              },
+                              child: Text("Von ${formatTime(startTime)}"),
+                            ),
+                          ),
+                          const SizedBox(width: 8),
+                          Expanded(
+                            child: OutlinedButton(
+                              onPressed: () async {
+                                final picked = await show24hTimePicker(
+                                  context: context,
+                                  initialTime: endTime,
+                                );
+                                if (picked != null) {
+                                  setDialogState(() => endTime = picked);
+                                }
+                              },
+                              child: Text("Bis ${formatTime(endTime)}"),
+                            ),
+                          ),
+                        ],
+                      ),
+                      Padding(
+                        padding: const EdgeInsets.only(top: 4),
+                        child: Text(
+                          usesProfileDefault
+                              ? "Standardmäßig aus dem aktiven Profil "
+                                  "\"${widget.project.activeWorkTimeProfile!.name}\" "
+                                  "übernommen, weiter änderbar."
+                              : "Standardmäßig wird 07:00–17:00 eingetragen, "
+                                  "weiter änderbar.",
+                          style:
+                              const TextStyle(color: Colors.grey, fontSize: 11),
+                        ),
+                      ),
+                    ],
                     if (widget.project.activeWorkTimeProfile != null)
                       Padding(
                         padding: const EdgeInsets.only(top: 10),
@@ -587,10 +669,8 @@ class _OverviewTabState extends State<OverviewTab> {
                         from: from,
                         to: to,
                         name: name,
-                        startTime:
-                            startTime == null ? null : formatTime(startTime!),
-                        endTime:
-                            endTime == null ? null : formatTime(endTime!),
+                        startTime: showTime ? formatTime(startTime) : null,
+                        endTime: showTime ? formatTime(endTime) : null,
                         actor: actor,
                       );
                     }

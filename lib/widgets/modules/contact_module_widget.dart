@@ -1,15 +1,91 @@
 import 'package:flutter/foundation.dart' show kIsWeb, defaultTargetPlatform;
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_contacts/flutter_contacts.dart';
 import 'package:provider/provider.dart';
 import 'package:url_launcher/url_launcher.dart';
 
 import '../../models/modules/contact_module.dart';
+import '../../models/project.dart';
 import '../../state/project_store.dart';
 import '../../state/settings_store.dart';
 import '../../utils/name_capitalization.dart';
 import '../audit_info_icon.dart';
 import 'module_card.dart';
+
+// Telefonnummern: nur Ziffern plus die im Alltag üblichen
+// Formatierungszeichen (+, Leerzeichen, Klammern, Bindestrich, Schrägstrich)
+// - keine Buchstaben.
+final _phoneInputFormatter =
+    FilteringTextInputFormatter.allow(RegExp(r'[0-9+\-\s()/]'));
+
+// Entfernt versehentlich mitgetippte/eingefügte Leerzeichen aus einer
+// Email-Adresse (z.B. beim Copy-Paste aus einer PDF).
+String _stripEmailSpaces(String value) => value.replaceAll(RegExp(r'\s+'), '');
+
+// Einfache Plausibilitätsprüfung (nicht RFC-vollständig, reicht aber für
+// Tippfehler wie fehlendes "@" oder fehlende Domain) - leer gilt als
+// gültig, da das Feld optional ist.
+final _emailPattern = RegExp(r'^[^@\s]+@[^@\s]+\.[^@\s]+$');
+bool _isValidEmail(String value) => value.isEmpty || _emailPattern.hasMatch(value);
+
+// Die Prüfung ist nur eine Plausibilitätshilfe, keine echte RFC-Validierung
+// - manche seltenen, aber gültigen Adressen fallen durch. Statt hart zu
+// blockieren, kann der Nutzer die Warnung bewusst ignorieren und trotzdem
+// speichern.
+// Bei mehreren kommagetrennten Namen gäbe es keine eindeutige Zuordnung,
+// wem eine gleichzeitig eingetragene Email gehört - statt sie dann
+// stillschweigend zu verwerfen (der Nutzer könnte annehmen, sie wäre allen
+// zugewiesen worden), muss das hier bewusst bestätigt werden.
+Future<bool> _confirmDropEmailForMultipleNames(BuildContext context) async {
+  final result = await showDialog<bool>(
+    context: context,
+    builder: (dialogContext) => AlertDialog(
+      title: const Text("Email wird nicht übernommen"),
+      content: const Text(
+        "Bei mehreren, kommagetrennten Namen kann die eingetragene "
+        "Email-Adresse nicht eindeutig zugeordnet werden und bleibt "
+        "leer. Um sie zu übernehmen, füge die Person einzeln hinzu.",
+      ),
+      actions: [
+        TextButton(
+          onPressed: () => Navigator.pop(dialogContext, false),
+          child: const Text("Bearbeiten"),
+        ),
+        ElevatedButton(
+          onPressed: () => Navigator.pop(dialogContext, true),
+          child: const Text("Ohne Email fortfahren"),
+        ),
+      ],
+    ),
+  );
+  return result ?? false;
+}
+
+Future<bool> _confirmSaveInvalidEmail(BuildContext context) async {
+  final result = await showDialog<bool>(
+    context: context,
+    builder: (dialogContext) => AlertDialog(
+      title: const Text("Email-Adresse prüfen"),
+      content: const Text(
+        "Die Email-Adresse sieht ungültig aus (kein \"@\" oder keine Domain "
+        "erkannt). Falls es sich um eine unübliche, aber tatsächlich "
+        "gültige Adresse handelt, kannst du die Prüfung ignorieren.",
+      ),
+      actions: [
+        TextButton(
+          onPressed: () => Navigator.pop(dialogContext, false),
+          child: const Text("Bearbeiten"),
+        ),
+        ElevatedButton(
+          onPressed: () => Navigator.pop(dialogContext, true),
+          child: const Text("Ignorieren, trotzdem speichern"),
+        ),
+      ],
+    ),
+  );
+  return result ?? false;
+}
 
 class ContactModuleWidget extends StatelessWidget {
   final String projectId;
@@ -83,25 +159,40 @@ class ContactModuleWidget extends StatelessWidget {
   }
 
   // Ausnahmefall: Person manuell erfassen, ohne Telefonkontakt.
-  void _addManually(BuildContext context) {
+  void _addManually(BuildContext context, {required bool showContactEmail}) {
     final store = context.read<ProjectStore>();
     final actor = context.read<SettingsStore>().currentUserKurzzeichen;
     final nameController = TextEditingController();
+    final emailController = TextEditingController();
 
     showDialog(
       context: context,
       builder: (dialogContext) {
         return AlertDialog(
           title: const Text("Person manuell hinzufügen"),
-          content: TextField(
-            controller: nameController,
-            textCapitalization: TextCapitalization.words,
-            inputFormatters: const [NameCapitalizationFormatter()],
-            decoration: const InputDecoration(
-              labelText: "Name *",
-              helperText: "Mehrere Personen mit Komma trennen",
-            ),
-            autofocus: true,
+          content: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              TextField(
+                controller: nameController,
+                textCapitalization: TextCapitalization.words,
+                inputFormatters: const [NameCapitalizationFormatter()],
+                decoration: const InputDecoration(
+                  labelText: "Name *",
+                  helperText: "Mehrere Personen mit Komma trennen",
+                ),
+                autofocus: true,
+              ),
+              if (showContactEmail) ...[
+                const SizedBox(height: 10),
+                TextField(
+                  controller: emailController,
+                  keyboardType: TextInputType.emailAddress,
+                  decoration: const InputDecoration(labelText: "Email"),
+                ),
+              ],
+            ],
           ),
           actions: [
             TextButton(
@@ -109,26 +200,50 @@ class ContactModuleWidget extends StatelessWidget {
               child: const Text("Abbrechen"),
             ),
             ElevatedButton(
-              onPressed: () {
+              onPressed: () async {
                 final names = splitNames(nameController.text);
                 if (names.isEmpty) return;
+                // Die eingetragene Email gehört zu EINER Person - bei
+                // mehreren kommagetrennten Namen gäbe es sonst keine
+                // eindeutige Zuordnung, wem sie gehört, deshalb dann leer
+                // lassen statt sie allen gleichermaßen zuzuweisen. Das muss
+                // der Nutzer bestätigen, statt die Email stillschweigend zu
+                // verlieren.
+                if (names.length > 1 &&
+                    emailController.text.trim().isNotEmpty) {
+                  final proceed =
+                      await _confirmDropEmailForMultipleNames(dialogContext);
+                  if (!dialogContext.mounted) return;
+                  if (!proceed) return;
+                }
+                final email = names.length == 1
+                    ? _stripEmailSpaces(emailController.text.trim())
+                    : '';
+                if (!_isValidEmail(email)) {
+                  final proceed = await _confirmSaveInvalidEmail(dialogContext);
+                  if (!proceed) return;
+                }
                 for (final name in names) {
                   store.addContactPerson(
                     projectId,
                     gewerkId,
                     module.id,
                     name: name,
+                    email: email,
                     actor: actor,
                   );
                 }
-                Navigator.pop(dialogContext);
+                if (dialogContext.mounted) Navigator.pop(dialogContext);
               },
               child: const Text("Hinzufügen"),
             ),
           ],
         );
       },
-    ).then((_) => nameController.dispose());
+    ).then((_) {
+      nameController.dispose();
+      emailController.dispose();
+    });
   }
 
   Future<void> _call(BuildContext context, String phone) async {
@@ -158,10 +273,24 @@ class ContactModuleWidget extends StatelessWidget {
       (defaultTargetPlatform == TargetPlatform.android ||
           defaultTargetPlatform == TargetPlatform.iOS);
 
-  // Öffnet direkt die Gmail-App (Deep Link); ist sie nicht installiert,
-  // fällt es auf die Standard-Mail-App des Geräts zurück.
+  // Öffnet direkt die Gmail-App. Android: googlegmail:// wird von der
+  // Gmail-App dort nicht registriert (nur iOS) - stattdessen ein expliziter
+  // Intent auf das Gmail-Package (funktioniert wie ein Tap auf das
+  // App-Icon, unabhängig von Custom-URL-Schemes). Ist Gmail nicht
+  // installiert, fällt es auf die Standard-Mail-App des Geräts zurück.
   Future<void> _openGmail(BuildContext context) async {
-    final launched = await launchUrl(Uri.parse('googlegmail://'));
+    // "intent:" statt "intent://": Mit "//" würde die URI eine Authority
+    // (Host) VOR "#Intent;" erwarten - ohne Host/Pfad dazwischen scheitert
+    // Intent.parseUri auf manchen Android-Versionen am Parsen, und der
+    // Aufruf fällt dann still auf die mailto:-Alternative unten zurück,
+    // statt Gmail zu öffnen.
+    final gmailUri = defaultTargetPlatform == TargetPlatform.android
+        ? Uri.parse(
+            'intent:#Intent;package=com.google.android.gm;'
+            'action=android.intent.action.MAIN;'
+            'category=android.intent.category.LAUNCHER;end')
+        : Uri.parse('googlegmail://');
+    final launched = await launchUrl(gmailUri);
     if (!launched) {
       final fallback = await launchUrl(Uri.parse('mailto:'));
       if (!fallback && context.mounted) {
@@ -175,6 +304,12 @@ class ContactModuleWidget extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final actor = context.watch<SettingsStore>().currentUserKurzzeichen;
+    final store = context.watch<ProjectStore>();
+    Project? project;
+    for (final p in store.projects) {
+      if (p.id == projectId) project = p;
+    }
+    final showContactEmail = project?.showContactEmail ?? false;
 
     return ModuleCard(
       projectId: projectId,
@@ -186,20 +321,9 @@ class ContactModuleWidget extends StatelessWidget {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Row(
-            children: [
-              TextButton.icon(
-                onPressed: () => _pickFromContacts(context),
-                icon: const Icon(Icons.contacts, size: 18),
-                label: const Text("Aus Kontakten importieren"),
-              ),
-              const Spacer(),
-              AuditInfoIcon(history: module.history),
-            ],
-          ),
           if (_isSmartphone)
             Padding(
-              padding: const EdgeInsets.symmetric(vertical: 8),
+              padding: const EdgeInsets.only(bottom: 8),
               child: Center(
                 child: OutlinedButton.icon(
                   onPressed: () => _openGmail(context),
@@ -208,6 +332,21 @@ class ContactModuleWidget extends StatelessWidget {
                 ),
               ),
             ),
+          Row(
+            children: [
+              // Kontaktauswahl gibt es auf Web ohnehin nicht (flutter_contacts
+              // ist Android/iOS-only) - Button gar nicht erst anzeigen statt
+              // erst nach Antippen mit einer Fehlermeldung zu reagieren.
+              if (!kIsWeb)
+                TextButton.icon(
+                  onPressed: () => _pickFromContacts(context),
+                  icon: const Icon(Icons.contacts, size: 18),
+                  label: const Text("Aus Kontakten importieren"),
+                ),
+              const Spacer(),
+              AuditInfoIcon(history: module.history),
+            ],
+          ),
           if (module.contacts.isEmpty)
             const Padding(
               padding: EdgeInsets.symmetric(vertical: 6),
@@ -225,6 +364,7 @@ class ContactModuleWidget extends StatelessWidget {
                 module: module,
                 person: person,
                 actor: actor,
+                showContactEmail: showContactEmail,
                 onCall: (phone) => _call(context, phone),
                 onWhatsApp: (phone) => _openWhatsApp(context, phone),
               ),
@@ -232,7 +372,8 @@ class ContactModuleWidget extends StatelessWidget {
           Align(
             alignment: Alignment.centerLeft,
             child: TextButton.icon(
-              onPressed: () => _addManually(context),
+              onPressed: () => _addManually(context,
+                  showContactEmail: showContactEmail),
               icon: const Icon(Icons.person_add_alt, size: 16),
               label: const Text("Manuell hinzufügen (ohne Telefonkontakt)"),
               style: TextButton.styleFrom(
@@ -252,6 +393,7 @@ class _ContactPersonTile extends StatefulWidget {
   final ContactModule module;
   final ContactPerson person;
   final String actor;
+  final bool showContactEmail;
   final void Function(String phone) onCall;
   final void Function(String phone) onWhatsApp;
 
@@ -262,6 +404,7 @@ class _ContactPersonTile extends StatefulWidget {
     required this.module,
     required this.person,
     required this.actor,
+    required this.showContactEmail,
     required this.onCall,
     required this.onWhatsApp,
   });
@@ -273,24 +416,31 @@ class _ContactPersonTile extends StatefulWidget {
 class _ContactPersonTileState extends State<_ContactPersonTile> {
   late final _phoneController =
       TextEditingController(text: widget.person.phone);
+  late final _emailController =
+      TextEditingController(text: widget.person.email);
 
   @override
   void didUpdateWidget(covariant _ContactPersonTile oldWidget) {
     super.didUpdateWidget(oldWidget);
     // Mit einem stabilen Key (siehe Aufrufstelle) bleibt dieses State-Objekt
     // über Rebuilds hinweg derselben Person zugeordnet - ändert sich ihre
-    // Telefonnummer extern (z.B. Sync-Merge von einem anderen Gerät), muss
-    // das Feld trotzdem nachgezogen werden, sonst zeigt es die veraltete
-    // Nummer, obwohl der Nutzer gerade nichts eingibt.
+    // Telefonnummer/Email extern (z.B. Sync-Merge von einem anderen Gerät),
+    // muss das Feld trotzdem nachgezogen werden, sonst zeigt es den
+    // veralteten Wert, obwohl der Nutzer gerade nichts eingibt.
     if (oldWidget.person.phone != widget.person.phone &&
         _phoneController.text != widget.person.phone) {
       _phoneController.text = widget.person.phone;
+    }
+    if (oldWidget.person.email != widget.person.email &&
+        _emailController.text != widget.person.email) {
+      _emailController.text = widget.person.email;
     }
   }
 
   @override
   void dispose() {
     _phoneController.dispose();
+    _emailController.dispose();
     super.dispose();
   }
 
@@ -322,11 +472,18 @@ class _ContactPersonTileState extends State<_ContactPersonTile> {
               Expanded(
                 child: Text(
                   person.name.isEmpty ? "(ohne Name)" : person.name,
-                  style: const TextStyle(fontWeight: FontWeight.bold),
+                  // Die Karte bleibt bewusst immer hellgrau (auch im
+                  // Dunkelmodus) - ohne feste Textfarbe würde der Name im
+                  // Dunkelmodus die helle Standard-Textfarbe erben und
+                  // kaum lesbar sein.
+                  style: const TextStyle(
+                    fontWeight: FontWeight.bold,
+                    color: Colors.black87,
+                  ),
                 ),
               ),
               IconButton(
-                icon: const Icon(Icons.close, size: 18),
+                icon: const Icon(Icons.close, size: 18, color: Colors.black54),
                 tooltip: "Person entfernen",
                 onPressed: () => store.removeContactPerson(
                   projectId,
@@ -342,6 +499,7 @@ class _ContactPersonTileState extends State<_ContactPersonTile> {
             controller: phoneController,
             decoration: const InputDecoration(labelText: "Telefonnummer"),
             keyboardType: TextInputType.phone,
+            inputFormatters: [_phoneInputFormatter],
             onFieldSubmitted: (value) => store.updateContactPerson(
               projectId,
               gewerkId,
@@ -352,6 +510,49 @@ class _ContactPersonTileState extends State<_ContactPersonTile> {
               actor: actor,
             ),
           ),
+          if (widget.showContactEmail)
+            Padding(
+              padding: const EdgeInsets.only(top: 8),
+              child: TextFormField(
+                controller: _emailController,
+                decoration: InputDecoration(
+                  labelText: "Email",
+                  suffixIcon: IconButton(
+                    icon: const Icon(Icons.copy, size: 18),
+                    tooltip: "Email kopieren",
+                    onPressed: person.email.isEmpty
+                        ? null
+                        : () async {
+                            await Clipboard.setData(
+                                ClipboardData(text: person.email));
+                            if (!context.mounted) return;
+                            ScaffoldMessenger.of(context).showSnackBar(
+                              const SnackBar(content: Text("Email kopiert")),
+                            );
+                          },
+                  ),
+                ),
+                keyboardType: TextInputType.emailAddress,
+                onFieldSubmitted: (value) async {
+                  final cleaned = _stripEmailSpaces(value);
+                  if (cleaned != value) _emailController.text = cleaned;
+                  if (!_isValidEmail(cleaned)) {
+                    final proceed = await _confirmSaveInvalidEmail(context);
+                    if (!proceed) return;
+                  }
+                  store.updateContactPerson(
+                    projectId,
+                    gewerkId,
+                    module.id,
+                    person.id,
+                    name: person.name,
+                    phone: person.phone,
+                    email: cleaned,
+                    actor: actor,
+                  );
+                },
+              ),
+            ),
           if (hasPhone)
             Padding(
               padding: const EdgeInsets.only(top: 6),

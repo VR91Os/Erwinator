@@ -87,6 +87,11 @@ class Project {
   bool financeEnabled;
   List<FinanceEntry> financeEntries;
 
+  // Projektweit: zeigt/erfasst ein Email-Feld je Person im Kontakt-Modul
+  // (siehe overview_settings_screen.dart) - standardmäßig aus, damit das
+  // Kontakt-Modul im Regelfall auf Name/Telefon beschränkt bleibt.
+  bool showContactEmail;
+
   // Vom Nutzer frei festgelegte Reihenfolge der Reiter oben in der
   // Projektansicht (Überblick, Gewerke, Dateiablage, Zeitstatistik,
   // Finanzen - als IDs). Fehlende Einträge (neues Gewerk, neu aktiviertes
@@ -136,6 +141,7 @@ class Project {
     List<PresenceEntry>? onSitePresence,
     this.financeEnabled = false,
     List<FinanceEntry>? financeEntries,
+    this.showContactEmail = false,
     List<String>? tabOrder,
     DateTime? updatedAt,
     Map<String, DateTime>? deletedIds,
@@ -175,6 +181,7 @@ class Project {
         'onSitePresence': onSitePresence.map((e) => e.toMap()).toList(),
         'financeEnabled': financeEnabled,
         'financeEntries': financeEntries.map((e) => e.toMap()).toList(),
+        'showContactEmail': showContactEmail,
         'tabOrder': tabOrder,
         'updatedAt': updatedAt.toIso8601String(),
         'deletedIds': deletedIds
@@ -222,6 +229,7 @@ class Project {
         financeEntries: (map['financeEntries'] as List<dynamic>? ?? [])
             .map((e) => FinanceEntry.fromMap(e as Map<String, dynamic>))
             .toList(),
+        showContactEmail: map['showContactEmail'] as bool? ?? false,
         tabOrder: (map['tabOrder'] as List<dynamic>? ?? [])
             .map((e) => e as String)
             .toList(),
@@ -291,6 +299,7 @@ class Project {
       extendedTimeCalendar: winner.extendedTimeCalendar,
       activeWorkTimeProfileId: winner.activeWorkTimeProfileId,
       financeEnabled: winner.financeEnabled,
+      showContactEmail: winner.showContactEmail,
       tabOrder: winner.tabOrder,
       updatedAt: winner.updatedAt,
       deletedIds: tombstones,

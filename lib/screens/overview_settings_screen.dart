@@ -112,6 +112,7 @@ class _OverviewSettingsScreenState extends State<OverviewSettingsScreen> {
   @override
   Widget build(BuildContext context) {
     final store = context.watch<ProjectStore>();
+    final settingsStore = context.watch<SettingsStore>();
     final project = store.projects.firstWhere((p) => p.id == widget.projectId);
 
     return Scaffold(
@@ -122,6 +123,29 @@ class _OverviewSettingsScreenState extends State<OverviewSettingsScreen> {
           // ✅ Reihenfolge sinngemäß: alltägliche Verhaltens-Einstellungen
           // zuerst, danach optionale Module/Zusammenarbeit, Exportieren
           // (seltenste Aktion) ganz unten.
+          const Text(
+            "Design",
+            style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
+          ),
+          const SizedBox(height: 4),
+          const Text(
+            // App-weit, nicht je Projekt - wirkt sich auch auf andere
+            // Projekte aus.
+            "Gilt für die ganze App, nicht nur für dieses Projekt.",
+            style: TextStyle(color: Colors.grey),
+          ),
+          const SizedBox(height: 8),
+          SegmentedButton<String>(
+            segments: const [
+              ButtonSegment(value: 'system', label: Text("System")),
+              ButtonSegment(value: 'light', label: Text("Hell")),
+              ButtonSegment(value: 'dark', label: Text("Dunkel")),
+            ],
+            selected: {settingsStore.settings.themeMode},
+            onSelectionChanged: (selection) =>
+                settingsStore.setThemeMode(selection.first),
+          ),
+          const Divider(height: 40),
           const Text(
             "Aufgaben-Status",
             style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
@@ -199,6 +223,28 @@ class _OverviewSettingsScreenState extends State<OverviewSettingsScreen> {
               widget.projectId,
               priorityWarningDays: project.priorityWarningDays,
               notifyOnPriorityWarning: value ?? false,
+            ),
+          ),
+          const Divider(height: 40),
+          const Text(
+            "Kontaktdaten",
+            style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
+          ),
+          const SizedBox(height: 4),
+          const Text(
+            "Ist die Checkbox aus, bleibt das Kontakt-Modul auf Name und "
+            "Telefonnummer beschränkt. Aktiviert zeigt jede Person "
+            "zusätzlich ein Email-Feld (manuell hinzufügen und bei "
+            "bestehenden Personen).",
+            style: TextStyle(color: Colors.grey),
+          ),
+          CheckboxListTile(
+            contentPadding: EdgeInsets.zero,
+            title: const Text("Auch Email angeben"),
+            value: project.showContactEmail,
+            onChanged: (value) => store.updateShowContactEmail(
+              widget.projectId,
+              enabled: value ?? false,
             ),
           ),
           const Divider(height: 40),
@@ -333,8 +379,63 @@ class _OverviewSettingsScreenState extends State<OverviewSettingsScreen> {
             icon: const Icon(Icons.upload_file),
             label: const Text("Gesamtes Projekt exportieren"),
           ),
+          const Divider(height: 40),
+          const Text(
+            "Projekt löschen",
+            style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
+          ),
+          const SizedBox(height: 4),
+          const Text(
+            "Entfernt das Projekt unwiderruflich von diesem Gerät. Vorher "
+            "am besten exportieren (siehe oben), falls noch gebraucht.",
+            style: TextStyle(color: Colors.grey),
+          ),
+          const SizedBox(height: 12),
+          ElevatedButton.icon(
+            style: ElevatedButton.styleFrom(
+              foregroundColor: Colors.white,
+              backgroundColor: Colors.red,
+            ),
+            onPressed: () => _confirmDeleteProject(context, project),
+            icon: const Icon(Icons.delete_forever),
+            label: const Text("Projekt endgültig löschen"),
+          ),
         ],
       ),
+    );
+  }
+
+  void _confirmDeleteProject(BuildContext context, Project project) {
+    showDialog(
+      context: context,
+      builder: (dialogContext) {
+        return AlertDialog(
+          title: const Text("Projekt endgültig löschen?"),
+          content: Text(
+            '"${project.name}" wird mit allen Gewerken, Aufgaben, Dateien '
+            'und sonstigen Daten unwiderruflich von diesem Gerät entfernt.'
+            '${project.sharedId == null ? '' : ' Andere Geräte/Team-Mitglieder behalten ihre eigene Kopie.'}',
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(dialogContext),
+              child: const Text("Abbrechen"),
+            ),
+            ElevatedButton(
+              style: ElevatedButton.styleFrom(backgroundColor: Colors.red),
+              onPressed: () {
+                Navigator.pop(dialogContext);
+                context.read<ProjectStore>().removeProject(project.id);
+                // Zurück bis zum Start-Bildschirm - das gelöschte Projekt
+                // existiert nicht mehr, GewerkeScreen darüber im Stack
+                // würde sonst mit einer leeren firstWhere() abstürzen.
+                Navigator.of(context).popUntil((route) => route.isFirst);
+              },
+              child: const Text("Endgültig löschen"),
+            ),
+          ],
+        );
+      },
     );
   }
 }

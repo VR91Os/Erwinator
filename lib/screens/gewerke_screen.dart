@@ -244,7 +244,14 @@ class _GewerkeScreenState extends State<GewerkeScreen> {
         final ids = tabs.map((t) => t.id).toList();
         final moved = ids.removeAt(oldIndex);
         ids.insert(newIndex, moved);
-        store.updateTabOrder(project.id, ids);
+        // Erst nach dem aktuellen Frame speichern: store.updateTabOrder löst
+        // über notifyListeners() einen Provider-weiten Rebuild aus (u.a.
+        // dieser ReorderableListView selbst) - passiert das noch synchron,
+        // während SliverReorderableList das Drag-Ende intern verarbeitet,
+        // kollidiert das mit dessen Element-Umhängung
+        // ("_dependents.isEmpty"-Assertion).
+        WidgetsBinding.instance
+            .addPostFrameCallback((_) => store.updateTabOrder(project.id, ids));
       },
       itemBuilder: (context, index) {
         final tab = tabs[index];
@@ -286,9 +293,10 @@ class _GewerkeScreenState extends State<GewerkeScreen> {
     final Color textColor;
     if (urgent) {
       // ✅ Überschreibt Blau/Grau: offene Prio-Aufgabe hat die projektweit
-      // eingestellte Warnschwelle vor Fälligkeit erreicht.
-      color = selected ? Colors.red.shade400 : Colors.red.shade200;
-      textColor = selected ? Colors.white : Colors.red.shade900;
+      // eingestellte Warnschwelle vor Fälligkeit erreicht. Hellorange statt
+      // Rot, konsistent mit der Aufgaben-/Kalenderfarbe (taskUrgencyColor).
+      color = selected ? Colors.orange.shade400 : Colors.orange.shade200;
+      textColor = selected ? Colors.white : Colors.orange.shade900;
     } else if (accent) {
       color = selected ? Colors.blue.shade400 : Colors.blue.shade200;
       textColor = selected ? Colors.white : Colors.blue.shade900;
@@ -326,8 +334,12 @@ class _GewerkeScreenState extends State<GewerkeScreen> {
     return ReorderableListView.builder(
       buildDefaultDragHandles: false,
       itemCount: gewerk.modules.length,
-      onReorderItem: (oldIndex, newIndex) => store.reorderModules(
-          project.id, gewerk.id, oldIndex, newIndex),
+      // Verzögert (siehe _buildTabBar): sonst löst notifyListeners() einen
+      // Rebuild aus, während SliverReorderableList das Drag-Ende noch
+      // intern verarbeitet -> "_dependents.isEmpty"-Assertion.
+      onReorderItem: (oldIndex, newIndex) =>
+          WidgetsBinding.instance.addPostFrameCallback((_) =>
+              store.reorderModules(project.id, gewerk.id, oldIndex, newIndex)),
       itemBuilder: (context, index) {
         final module = gewerk.modules[index];
         return ReorderableDelayedDragStartListener(

@@ -22,6 +22,11 @@ class AppSettings {
   // auf den nächsten Werktag). '' = keine Feiertage berücksichtigen.
   String holidayCountry;
 
+  // 'system' | 'light' | 'dark' - App-weite Design-Einstellung (nicht
+  // projektgebunden, auch wenn sie in den Überblick-Optionen eingestellt
+  // wird, siehe overview_settings_screen.dart).
+  String themeMode;
+
   AppSettings({
     this.jumpToLastProject = true,
     this.lastProjectId,
@@ -32,6 +37,7 @@ class AppSettings {
     List<TeamMember>? invitedUsers,
     List<String>? seenFeatureHints,
     this.holidayCountry = 'AT',
+    this.themeMode = 'system',
   })  : invitedUsers = invitedUsers ?? [],
         seenFeatureHints = seenFeatureHints ?? [];
 
@@ -45,6 +51,7 @@ class AppSettings {
         'invitedUsers': invitedUsers.map((u) => u.toMap()).toList(),
         'seenFeatureHints': seenFeatureHints,
         'holidayCountry': holidayCountry,
+        'themeMode': themeMode,
       };
 
   factory AppSettings.fromMap(Map<String, dynamic> map) => AppSettings(
@@ -61,5 +68,6 @@ class AppSettings {
             .map((e) => e as String)
             .toList(),
         holidayCountry: map['holidayCountry'] as String? ?? 'AT',
+        themeMode: map['themeMode'] as String? ?? 'system',
       );
 }

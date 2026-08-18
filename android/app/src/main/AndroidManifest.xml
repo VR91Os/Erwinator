@@ -4,6 +4,9 @@
     <!-- Für die Prio-Aufgaben-Warnschwellen-Push-Nachricht (flutter_local_notifications). -->
     <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED"/>
     <uses-permission android:name="android.permission.SCHEDULE_EXACT_ALARM"/>
+    <!-- Für den QR-Code-Scanner beim Projekt-Beitreten (mobile_scanner). -->
+    <uses-permission android:name="android.permission.CAMERA"/>
+    <uses-feature android:name="android.hardware.camera" android:required="false"/>
     <application
         android:label="Erwinator"
         android:name="${applicationName}"

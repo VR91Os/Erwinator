@@ -303,6 +303,27 @@ class ProjectStore extends ChangeNotifier {
     await _persist(project.id);
   }
 
+  // Entfernt das Projekt nur von diesem Gerät (kein Cloud-Löschen bei
+  // geteilten Projekten - andere Geräte/Team-Mitglieder behalten ihre
+  // eigene Kopie und die shared_projects-Zeile bleibt bestehen).
+  Future<void> removeProject(String projectId) async {
+    final project = _project(projectId);
+    if (project == null) return;
+    final sharedId = project.sharedId;
+    if (sharedId != null) {
+      final channel = _projectSubscriptions.remove(sharedId);
+      if (channel != null) _sharingService.unsubscribe(channel);
+    }
+    projects.removeWhere((p) => p.id == projectId);
+    notifyListeners();
+    try {
+      await _repository.saveProjects(projects);
+    } catch (e, stack) {
+      ErrorLogService.instance
+          .record('Lokales Speichern fehlgeschlagen', '$e\n$stack');
+    }
+  }
+
   Future<void> updateExportPrefs(
     String projectId, {
     required bool exportAllDatedTodos,
@@ -795,11 +816,13 @@ class ProjectStore extends ChangeNotifier {
     String moduleId, {
     required String name,
     String phone = '',
+    String email = '',
     required String actor,
   }) async {
     final module = _module(projectId, gewerkId, moduleId);
     if (module is! ContactModule) return;
-    module.contacts.add(ContactPerson(id: newId(), name: name, phone: phone));
+    module.contacts.add(
+        ContactPerson(id: newId(), name: name, phone: phone, email: email));
     module.history
         .add(AuditEntry(kurzzeichen: actor, action: 'Person hinzugefügt'));
     notifyListeners();
@@ -813,6 +836,7 @@ class ProjectStore extends ChangeNotifier {
     String personId, {
     required String name,
     required String phone,
+    String? email,
     required String actor,
   }) async {
     final module = _module(projectId, gewerkId, moduleId);
@@ -824,6 +848,7 @@ class ProjectStore extends ChangeNotifier {
     if (person == null) return;
     person.name = name;
     person.phone = phone;
+    if (email != null) person.email = email;
     person.updatedAt = DateTime.now();
     module.history.add(AuditEntry(kurzzeichen: actor, action: 'bearbeitet'));
     notifyListeners();
@@ -1030,48 +1055,60 @@ class ProjectStore extends ChangeNotifier {
     await _persist(projectId);
   }
 
-  // Ist an [day] laut aktivem Arbeitszeitprofil ein Arbeitstag, trägt der
-  // Helfer automatisch die daraus berechneten Stunden zur Zeitstatistik
-  // BEI (statt sie zu überschreiben) – Helfer eintragen im Überblick ist
-  // die einzige Erfassungsstelle, die Zeitstatistik zeigt nur die
-  // Auswertung. Jeder Helfer zählt nur einmal (Prüfung über helperNames),
-  // damit ein erneuter Sync (z.B. Merge) die Stunden nicht doppelt addiert.
+  // Trägt die aus dem aktiven Arbeitszeitprofil berechneten Stunden für
+  // [person] an [day] BEI (statt sie zu überschreiben), sofern die Person
+  // an diesem Tag noch nicht erfasst ist – egal über welche Quelle
+  // (Helferbedarf-Zusage oder "Ich bin auf der Baustelle"), damit dieselbe
+  // Person nie doppelt gezählt wird. [source] macht die Herkunft des
+  // Stunden-Beitrags nachvollziehbar (Kontributions-ID
+  // 'hourcontrib:$source:$entryId:$person'), damit removeHelperSignup nur
+  // die von ihm selbst erfassten Stunden wieder abzieht, nicht z.B. eine
+  // weiterhin aktive Anwesenheit, die zufällig zuerst gezählt wurde.
+  // Gibt zurück, ob tatsächlich etwas hinzugefügt wurde.
+  bool _addTimeTrackingHours(
+    Project project,
+    DateTime day, {
+    required String person,
+    required String source,
+    required String actor,
+    required String auditAction,
+  }) {
+    WorkDayEntry? entry;
+    for (final e in project.workDayEntries) {
+      if (e.date.isAtSameMomentAs(day)) entry = e;
+    }
+    if (entry != null && entry.helperNames.any((p) => p.person == person)) {
+      return false;
+    }
+    final schedule = project.activeWorkTimeProfile?.scheduleFor(day.weekday);
+    if (schedule == null) return false;
+    final isNewEntry = entry == null;
+    entry ??= WorkDayEntry(id: newId(), date: day);
+    entry.helperNames.add(PresenceEntry(person));
+    entry.hourContributions.add(HourContribution(
+      id: 'hourcontrib:$source:${entry.id}:$person',
+      amount: schedule.hours,
+    ));
+    entry.updatedAt = DateTime.now();
+    entry.history.add(AuditEntry(kurzzeichen: actor, action: auditAction));
+    if (isNewEntry) project.workDayEntries.add(entry);
+    return true;
+  }
+
   void _syncHelperIntoTimeTracking(
     Project project,
     DateTime day,
     String helperName,
     String actor,
   ) {
-    final schedule = project.activeWorkTimeProfile?.scheduleFor(day.weekday);
-    if (schedule == null) return;
-    WorkDayEntry? entry;
-    for (final e in project.workDayEntries) {
-      if (e.date.isAtSameMomentAs(day)) entry = e;
-    }
-    if (entry != null) {
-      if (entry.helperNames.any((p) => p.person == helperName)) return;
-      entry.hours += schedule.hours;
-      entry.helperNames.add(PresenceEntry(helperName));
-      entry.updatedAt = DateTime.now();
-      entry.history.add(AuditEntry(
-        kurzzeichen: actor,
-        action: 'Aus Helferbedarf übernommen: $helperName',
-      ));
-    } else {
-      project.workDayEntries.add(WorkDayEntry(
-        id: newId(),
-        date: day,
-        hours: schedule.hours,
-        helperNames: [PresenceEntry(helperName)],
-        history: [
-          AuditEntry(
-            kurzzeichen: actor,
-            action:
-                'Automatisch aus aktivem Profil erstellt (Helferbedarf: $helperName)',
-          ),
-        ],
-      ));
-    }
+    _addTimeTrackingHours(
+      project,
+      day,
+      person: helperName,
+      source: 'helper',
+      actor: actor,
+      auditAction: 'Aus Helferbedarf übernommen: $helperName',
+    );
   }
 
   Future<void> removeHelperSignup(
@@ -1091,30 +1128,45 @@ class ProjectStore extends ChangeNotifier {
     demand.signups.removeWhere((s) => s.id == signupId);
     project.deletedIds[signupId] = DateTime.now();
     final day = _dateOnly(demand.date);
-    final schedule = project.activeWorkTimeProfile?.scheduleFor(day.weekday);
+    final today = _dateOnly(DateTime.now());
     for (final signup in removedSignups) {
       WorkDayEntry? dayEntry;
       for (final e in project.workDayEntries) {
         if (e.date.isAtSameMomentAs(day)) dayEntry = e;
       }
       if (dayEntry == null) continue;
-      final wasCounted =
-          dayEntry.helperNames.any((p) => p.person == signup.name);
       dayEntry.helperNames.removeWhere((p) => p.person == signup.name);
-      // Die beim Eintragen addierten Stunden (siehe
-      // _syncHelperIntoTimeTracking) wieder abziehen, sonst bleibt die
-      // Zeitstatistik nach dem Entfernen eines Helfers dauerhaft zu hoch.
-      if (wasCounted && schedule != null) {
-        dayEntry.hours =
-            (dayEntry.hours - schedule.hours).clamp(0, double.infinity);
-      }
-      // Tombstone + frischer Zeitstempel, sonst würde ein späterer Merge
-      // (z.B. wenn ein anderes Gerät zwischenzeitlich nur die Stunden
-      // dieses Tages geändert hat) den entfernten Helfer aus der älteren
-      // Kopie wiederherstellen.
+      // Nur den von DIESER Zusage stammenden Stunden-Beitrag entfernen
+      // (eigene Kontributions-ID, siehe _addTimeTrackingHours) – nicht
+      // pauschal per aktuell aktivem Profil neu berechnen, sonst würde ein
+      // zwischenzeitlicher Profilwechsel die falsche Stundenzahl abziehen.
+      final contributionId = 'hourcontrib:helper:${dayEntry.id}:${signup.name}';
+      dayEntry.hourContributions.removeWhere((c) => c.id == contributionId);
+      // Tombstones für Namensliste UND Stunden-Beitrag, sonst würde ein
+      // späterer Merge (z.B. wenn ein anderes Gerät zwischenzeitlich nur
+      // die Stunden dieses Tages geändert hat) den entfernten Helfer aus
+      // der älteren Kopie wiederherstellen.
       project.deletedIds['helper:${dayEntry.id}:${signup.name}'] =
           DateTime.now();
+      project.deletedIds[contributionId] = DateTime.now();
       dayEntry.updatedAt = DateTime.now();
+      // War dieselbe Person zusätzlich, unabhängig von der jetzt entfernten
+      // Helferbedarf-Zusage, für heute als "auf der Baustelle" markiert,
+      // wurde ihr Anwesenheits-Beitrag oben nie erfasst, weil beide Quellen
+      // sich dieselbe Namensliste teilen und der Helferbedarf zuerst zählte
+      // (siehe _addTimeTrackingHours). Jetzt nachholen, statt die
+      // Anwesenheitsstunden mit der Zusage zu verlieren.
+      if (day.isAtSameMomentAs(today) &&
+          project.onSitePresence.any((p) => p.person == signup.name)) {
+        _addTimeTrackingHours(
+          project,
+          day,
+          person: signup.name,
+          source: 'presence',
+          actor: signup.name,
+          auditAction: 'Anwesenheit synchronisiert',
+        );
+      }
     }
     notifyListeners();
     await _persist(projectId);
@@ -1176,30 +1228,19 @@ class ProjectStore extends ChangeNotifier {
     final project = _project(projectId);
     if (project == null || project.onSitePresence.isEmpty) return;
     final today = _dateOnly(DateTime.now());
-    final schedule = project.activeWorkTimeProfile?.scheduleFor(today.weekday);
-    if (schedule == null) return;
-
-    WorkDayEntry? entry;
-    for (final e in project.workDayEntries) {
-      if (e.date.isAtSameMomentAs(today)) entry = e;
+    var changed = false;
+    for (final presence in project.onSitePresence) {
+      final added = _addTimeTrackingHours(
+        project,
+        today,
+        person: presence.person,
+        source: 'presence',
+        actor: actor,
+        auditAction: 'Anwesenheit synchronisiert',
+      );
+      changed = changed || added;
     }
-    final alreadyCounted =
-        entry?.helperNames.map((p) => p.person).toSet() ?? <String>{};
-    final newPresences = project.onSitePresence
-        .where((p) => !alreadyCounted.contains(p.person))
-        .toList();
-    if (newPresences.isEmpty) return;
-
-    final isNewEntry = entry == null;
-    entry ??= WorkDayEntry(id: newId(), date: today, hours: 0);
-    for (final presence in newPresences) {
-      entry.helperNames.add(PresenceEntry(presence.person));
-      entry.hours += schedule.hours;
-    }
-    if (isNewEntry) project.workDayEntries.add(entry);
-    entry.updatedAt = DateTime.now();
-    entry.history
-        .add(AuditEntry(kurzzeichen: actor, action: 'Anwesenheit synchronisiert'));
+    if (!changed) return;
     notifyListeners();
     await _persist(projectId);
   }
@@ -1308,14 +1349,26 @@ class ProjectStore extends ChangeNotifier {
       );
       final existing = byDate[day];
       if (existing != null) {
-        existing.hours += schedule.hours;
+        // Jede Anwendung ist eine eigene, unabhängige Kontribution (eigene
+        // ID) - eine bewusste Mehrfach-Anwendung addiert entsprechend
+        // mehrfach, siehe Kommentar oben.
+        existing.hourContributions.add(HourContribution(
+          id: 'hourcontrib:profile:${newId()}',
+          amount: schedule.hours,
+        ));
         existing.updatedAt = DateTime.now();
         existing.history.add(auditEntry);
       } else {
+        final entryId = newId();
         final entry = WorkDayEntry(
-          id: newId(),
+          id: entryId,
           date: day,
-          hours: schedule.hours,
+          hourContributions: [
+            HourContribution(
+              id: 'hourcontrib:profile:${newId()}',
+              amount: schedule.hours,
+            ),
+          ],
           history: [auditEntry],
         );
         project.workDayEntries.add(entry);
@@ -1329,7 +1382,13 @@ class ProjectStore extends ChangeNotifier {
   // Manuelle Korrektur eines bereits erfassten Tages im Zeitstatistik-
   // Kalender: setzt die Stunden direkt (im Gegensatz zu den additiven
   // Erfassungswegen oben) auf den angegebenen Wert, um z.B. eine
-  // versehentliche Mehrfach-Erfassung wieder geradezurücken.
+  // versehentliche Mehrfach-Erfassung wieder geradezurücken. Alle
+  // bisherigen Beiträge werden dafür explizit getombstoned (nicht nur
+  // lokal geleert), sonst würde ein Merge mit einem Gerät, das diese
+  // Korrektur noch nicht kennt, die wegkorrigierten Beiträge wiederher-
+  // stellen. Ein danach auf einem anderen Gerät NEU hinzugekommener
+  // Beitrag (z.B. ein weiterer Helfer) bleibt dank "Edit schlägt Delete"
+  // trotzdem additiv erhalten.
   Future<void> updateWorkDayEntryHours(
     String projectId,
     String entryId, {
@@ -1343,8 +1402,18 @@ class ProjectStore extends ChangeNotifier {
       if (e.id == entryId) entry = e;
     }
     if (entry == null) return;
-    entry.hours = hours;
-    entry.updatedAt = DateTime.now();
+    final now = DateTime.now();
+    for (final contribution in entry.hourContributions) {
+      project.deletedIds[contribution.id] = now;
+    }
+    entry.hourContributions = [
+      HourContribution(
+        id: 'hourcontrib:correction:${newId()}',
+        amount: hours,
+        updatedAt: now,
+      ),
+    ];
+    entry.updatedAt = now;
     entry.history
         .add(AuditEntry(kurzzeichen: actor, action: 'Stunden korrigiert'));
     notifyListeners();
@@ -1397,6 +1466,18 @@ class ProjectStore extends ChangeNotifier {
     await _persist(projectId);
   }
 
+  Future<void> updateShowContactEmail(
+    String projectId, {
+    required bool enabled,
+  }) async {
+    final project = _project(projectId);
+    if (project == null) return;
+    project.showContactEmail = enabled;
+    project.updatedAt = DateTime.now();
+    notifyListeners();
+    await _persist(projectId);
+  }
+
   Future<void> updateTabOrder(String projectId, List<String> tabOrder) async {
     final project = _project(projectId);
     if (project == null) return;
@@ -1404,6 +1485,69 @@ class ProjectStore extends ChangeNotifier {
     project.updatedAt = DateTime.now();
     notifyListeners();
     await _persist(projectId);
+  }
+
+  // Ändert der lokale Nutzer nachträglich seinen Namen (SettingsStore),
+  // ändert sich dadurch i.d.R. auch sein Kürzel - ohne dieses Nachziehen
+  // blieben alle bereits erfassten Verlaufs-Einträge (AuditEntry) unter dem
+  // alten, jetzt "verwaisten" Kürzel stehen. Läuft projektübergreifend über
+  // alle Verlaufslisten (Module, Aufgaben, Dateien, Helferbedarfe,
+  // Arbeitstage, Finanz-Einträge).
+  //
+  // Bewusst rein lokal (kein updatedAt-Bump je Eintrag): AuditEntry hat
+  // keinen eigenen Zeitstempel für Konfliktauflösung, daher könnte ein
+  // erzwungener Bump bei geteilten Projekten unbeteiligte, zwischenzeitlich
+  // von anderen Geräten geänderte Felder überschreiben. Der korrigierte
+  // Verlauf verbreitet sich stattdessen über den nächsten normalen
+  // Sync-Push; bei einem zu diesem Zeitpunkt noch nicht aktualisierten
+  // Remote-Stand kann derselbe Eintrag durch die verlustfreie
+  // Verlaufs-Vereinigung (mergeHistory) vorübergehend doppelt (altes +
+  // neues Kürzel) erscheinen, statt ersetzt zu werden.
+  Future<void> renameKurzzeichenInHistory(
+    String oldKurzzeichen,
+    String newKurzzeichen,
+  ) async {
+    if (oldKurzzeichen.isEmpty || oldKurzzeichen == newKurzzeichen) return;
+    var changed = false;
+    void rewrite(List<AuditEntry> history) {
+      for (final entry in history) {
+        if (entry.kurzzeichen == oldKurzzeichen) {
+          entry.kurzzeichen = newKurzzeichen;
+          changed = true;
+        }
+      }
+    }
+
+    for (final project in projects) {
+      for (final demand in project.helperDemands) {
+        rewrite(demand.history);
+      }
+      for (final entry in project.workDayEntries) {
+        rewrite(entry.history);
+      }
+      for (final entry in project.financeEntries) {
+        rewrite(entry.history);
+      }
+      for (final gewerk in project.gewerke) {
+        for (final module in gewerk.modules) {
+          if (module is ContactModule) rewrite(module.history);
+          if (module is TodoModule) {
+            for (final task in module.tasks) {
+              rewrite(task.history);
+            }
+          }
+          if (module is FileModule) {
+            for (final entry in module.entries) {
+              rewrite(entry.history);
+            }
+          }
+        }
+      }
+    }
+
+    if (!changed) return;
+    notifyListeners();
+    await _persist();
   }
 
   Future<void> addFinanceEntry(String projectId, FinanceEntry entry) async {

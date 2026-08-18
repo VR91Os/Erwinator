@@ -1,5 +1,18 @@
 import 'package:flutter/services.dart';
 
+// Setzt Tausenderpunkte in eine rein numerische Ziffernfolge (kein
+// Vorzeichen, kein Dezimalteil), z.B. "1234" -> "1.234". Gemeinsam
+// verwendet von formatAmount() und ThousandsSeparatorInputFormatter, damit
+// die Gruppierungslogik nicht doppelt gepflegt werden muss.
+String _groupThousands(String digits) {
+  final buffer = StringBuffer();
+  for (var i = 0; i < digits.length; i++) {
+    if (i > 0 && (digits.length - i) % 3 == 0) buffer.write('.');
+    buffer.write(digits[i]);
+  }
+  return buffer.toString();
+}
+
 // Formatiert einen Betrag im deutschen Format (Tausenderpunkt, Komma als
 // Dezimaltrennzeichen), z.B. 1234.5 -> "1.234,50" (+ " €" mit [withSuffix]).
 String formatAmount(double value, {bool withSuffix = true}) {
@@ -10,12 +23,8 @@ String formatAmount(double value, {bool withSuffix = true}) {
   final negative = intPart.startsWith('-');
   if (negative) intPart = intPart.substring(1);
 
-  final buffer = StringBuffer();
-  for (var i = 0; i < intPart.length; i++) {
-    if (i > 0 && (intPart.length - i) % 3 == 0) buffer.write('.');
-    buffer.write(intPart[i]);
-  }
-  final formatted = '${negative ? '-' : ''}$buffer,$decPart';
+  final formatted =
+      '${negative ? '-' : ''}${_groupThousands(intPart)},$decPart';
   return withSuffix ? '$formatted €' : formatted;
 }
 
@@ -58,13 +67,9 @@ class ThousandsSeparatorInputFormatter extends TextInputFormatter {
             .substring(commaIndex + 1)
             .replaceAll(RegExp(r'[^0-9]'), '');
 
-    final buffer = StringBuffer();
-    for (var i = 0; i < intDigits.length; i++) {
-      if (i > 0 && (intDigits.length - i) % 3 == 0) buffer.write('.');
-      buffer.write(intDigits[i]);
-    }
+    final groupedInt = _groupThousands(intDigits);
     final formatted =
-        commaIndex == -1 ? buffer.toString() : '$buffer,$decDigits';
+        commaIndex == -1 ? groupedInt : '$groupedInt,$decDigits';
 
     final newOffset =
         (formatted.length - selectionFromEnd).clamp(0, formatted.length);

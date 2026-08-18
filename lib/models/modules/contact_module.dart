@@ -9,12 +9,16 @@ class ContactPerson {
   String id;
   String name;
   String phone;
+  // Nur erfasst/angezeigt, wenn Project.showContactEmail aktiv ist (siehe
+  // overview_settings_screen.dart) - bleibt sonst leer.
+  String email;
   DateTime updatedAt;
 
   ContactPerson({
     required this.id,
     this.name = '',
     this.phone = '',
+    this.email = '',
     DateTime? updatedAt,
   }) : updatedAt = updatedAt ?? DateTime.now();
 
@@ -22,6 +26,7 @@ class ContactPerson {
         'id': id,
         'name': name,
         'phone': phone,
+        'email': email,
         'updatedAt': updatedAt.toIso8601String(),
       };
 
@@ -29,6 +34,7 @@ class ContactPerson {
         id: map['id'] as String,
         name: map['name'] as String? ?? '',
         phone: map['phone'] as String? ?? '',
+        email: map['email'] as String? ?? '',
         updatedAt: map['updatedAt'] == null
             ? DateTime.fromMillisecondsSinceEpoch(0)
             : DateTime.parse(map['updatedAt'] as String),

@@ -67,10 +67,25 @@ class SettingsStore extends ChangeNotifier {
   // Das Kurzzeichen wird immer automatisch aus dem Namen erzeugt (2
   // Buchstaben Vorname + 2 Buchstaben Nachname) und bei Kollision mit einem
   // bereits bekannten Teammitglied eindeutig gemacht.
-  Future<void> updateProfile({
+  //
+  // Gibt das alte Kurzzeichen zurück, falls sich durch die Namensänderung
+  // ein neues ergeben hat (sonst null) - der Aufrufer nutzt das, um
+  // bestehende Verlaufs-Einträge (ProjectStore) auf das neue Kürzel
+  // nachzuziehen, statt sie unter dem alten Kürzel verwaisen zu lassen.
+  //
+  // Bewusst das rohe settings.userInitials statt des Fallback-Getters
+  // currentUserKurzzeichen: war vorher noch gar kein Name gesetzt, ist "??"
+  // nur ein generischer Platzhalter, den bei einem geteilten Projekt auch
+  // JEDER ANDERE noch nicht konfigurierte Nutzer benutzt (AuditEntry kennt
+  // keine Geräte-/Nutzer-ID, nur das Kürzel) - ihn hier als "altes Kürzel"
+  // zurückzugeben, würde renameKurzzeichenInHistory dazu bringen, auch
+  // deren "??"-Einträge fälschlich auf den jetzt konfigurierten Nutzer
+  // umzuschreiben.
+  Future<String?> updateProfile({
     required String userName,
     required String googleAccountEmail,
   }) async {
+    final oldInitials = settings.userInitials;
     settings.userName = userName;
     settings.userInitials = generateKurzzeichen(
       userName,
@@ -79,6 +94,8 @@ class SettingsStore extends ChangeNotifier {
     settings.googleAccountEmail = googleAccountEmail;
     notifyListeners();
     await _persist();
+    if (oldInitials.isEmpty) return null;
+    return oldInitials != settings.userInitials ? oldInitials : null;
   }
 
   Future<void> addInvitedUser({
@@ -119,6 +136,13 @@ class SettingsStore extends ChangeNotifier {
 
   Future<void> setHolidayCountry(String countryCode) async {
     settings.holidayCountry = countryCode;
+    notifyListeners();
+    await _persist();
+  }
+
+  // 'system' | 'light' | 'dark'.
+  Future<void> setThemeMode(String mode) async {
+    settings.themeMode = mode;
     notifyListeners();
     await _persist();
   }
