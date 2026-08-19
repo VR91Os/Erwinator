@@ -18,6 +18,7 @@ import '../widgets/modules/file_module_widget.dart';
 import '../widgets/modules/finance_module_widget.dart';
 import '../widgets/modules/module_picker_dialog.dart';
 import '../widgets/modules/todo_module_widget.dart';
+import '../utils/safe_notify.dart';
 import '../utils/task_urgency.dart';
 import '../widgets/file_archive_tab.dart';
 import '../widgets/overview_tab.dart';
@@ -79,8 +80,21 @@ class _GewerkeScreenState extends State<GewerkeScreen> {
   Widget build(BuildContext context) {
     final store = context.watch<ProjectStore>();
     final settingsStore = context.watch<SettingsStore>();
-    final project =
-        store.projects.firstWhere((p) => p.id == widget.projectId);
+
+    Project? foundProject;
+    for (final p in store.projects) {
+      if (p.id == widget.projectId) foundProject = p;
+    }
+    if (foundProject == null) {
+      // Projekt wurde inzwischen gelöscht (z.B. durch Sync von einem
+      // anderen Gerät, während dieser Screen offen war) -> statt
+      // abzustürzen einfach zurück.
+      return Scaffold(
+        appBar: buildAppBar("Projekt", context, true),
+        body: const Center(child: Text("Dieses Projekt existiert nicht mehr.")),
+      );
+    }
+    final project = foundProject;
 
     final selectedGewerkIndex =
         project.gewerke.indexWhere((g) => g.id == selectedTabId);
@@ -275,14 +289,7 @@ class _GewerkeScreenState extends State<GewerkeScreen> {
         final ids = tabs.map((t) => t.id).toList();
         final moved = ids.removeAt(oldIndex);
         ids.insert(newIndex, moved);
-        // Erst nach dem aktuellen Frame speichern: store.updateTabOrder löst
-        // über notifyListeners() einen Provider-weiten Rebuild aus (u.a.
-        // dieser ReorderableListView selbst) - passiert das noch synchron,
-        // während SliverReorderableList das Drag-Ende intern verarbeitet,
-        // kollidiert das mit dessen Element-Umhängung
-        // ("_dependents.isEmpty"-Assertion).
-        WidgetsBinding.instance
-            .addPostFrameCallback((_) => store.updateTabOrder(project.id, ids));
+        deferredNotify(() => store.updateTabOrder(project.id, ids));
       },
       itemBuilder: (context, index) {
         final tab = tabs[index];
@@ -365,12 +372,8 @@ class _GewerkeScreenState extends State<GewerkeScreen> {
     return ReorderableListView.builder(
       buildDefaultDragHandles: false,
       itemCount: gewerk.modules.length,
-      // Verzögert (siehe _buildTabBar): sonst löst notifyListeners() einen
-      // Rebuild aus, während SliverReorderableList das Drag-Ende noch
-      // intern verarbeitet -> "_dependents.isEmpty"-Assertion.
-      onReorderItem: (oldIndex, newIndex) =>
-          WidgetsBinding.instance.addPostFrameCallback((_) =>
-              store.reorderModules(project.id, gewerk.id, oldIndex, newIndex)),
+      onReorderItem: (oldIndex, newIndex) => deferredNotify(
+          () => store.reorderModules(project.id, gewerk.id, oldIndex, newIndex)),
       itemBuilder: (context, index) {
         final module = gewerk.modules[index];
         return ReorderableDelayedDragStartListener(

@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 
 import '../../state/project_store.dart';
+import '../../utils/safe_notify.dart';
 
 void showNewGewerkDialog(BuildContext context, String projectId) {
   final controller = TextEditingController();
@@ -23,11 +24,11 @@ void showNewGewerkDialog(BuildContext context, String projectId) {
           ),
           ElevatedButton(
             onPressed: () {
-              if (controller.text.trim().isEmpty) {
+              final name = controller.text.trim();
+              if (name.isEmpty) {
                 return;
               }
-              store.addGewerk(projectId, controller.text.trim());
-              Navigator.pop(dialogContext);
+              popDialogThen(dialogContext, () => store.addGewerk(projectId, name));
             },
             child: const Text("Erstellen"),
           ),

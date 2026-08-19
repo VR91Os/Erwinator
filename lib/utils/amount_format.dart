@@ -37,7 +37,30 @@ String formatAmountForInput(double? value) =>
 double? parseAmount(String raw) {
   final trimmed = raw.trim();
   if (trimmed.isEmpty) return null;
-  return double.tryParse(trimmed.replaceAll('.', '').replaceAll(',', '.'));
+
+  final hasComma = trimmed.contains(',');
+  final hasDot = trimmed.contains('.');
+
+  String normalized;
+  if (hasComma) {
+    // "," ist immer der Dezimaltrenner; "." (falls vorhanden) ist Tausenderpunkt.
+    normalized = trimmed.replaceAll('.', '').replaceAll(',', '.');
+  } else if (hasDot) {
+    // Ohne Komma ist nicht eindeutig, ob "." Tausenderpunkt oder
+    // Dezimaltrenner ist. Gruppen aus genau 3 Ziffern nach jedem Punkt
+    // (z.B. "1.234", "1.234.567") gelten als Tausenderpunkte; alles
+    // andere (z.B. "1234.56") als Dezimalpunkt.
+    final groups = trimmed.split('.');
+    final looksLikeThousands =
+        groups.length > 1 &&
+        groups.first.isNotEmpty &&
+        groups.skip(1).every((g) => g.length == 3 && int.tryParse(g) != null);
+    normalized = looksLikeThousands ? trimmed.replaceAll('.', '') : trimmed;
+  } else {
+    normalized = trimmed;
+  }
+
+  return double.tryParse(normalized);
 }
 
 // Rundet kaufmännisch auf ganze Cent (vermeidet Fließkomma-Rundungsreste
@@ -56,16 +79,17 @@ class ThousandsSeparatorInputFormatter extends TextInputFormatter {
 
     final selectionFromEnd = newValue.text.length - newValue.selection.end;
 
-    final commaIndex = newValue.text.indexOf(',');
-    final intSection = commaIndex == -1
-        ? newValue.text
-        : newValue.text.substring(0, commaIndex);
+    // Der Tausenderpunkt wird unten automatisch eingefügt, Nutzer müssen ihn
+    // nie selbst tippen. Ein manuell getipptes "." (z.B. Ziffernblock oder
+    // englisches Layout) kann daher nur als Dezimaltrenner gemeint sein.
+    final text = newValue.text.replaceAll('.', ',');
+
+    final commaIndex = text.indexOf(',');
+    final intSection = commaIndex == -1 ? text : text.substring(0, commaIndex);
     final intDigits = intSection.replaceAll(RegExp(r'[^0-9]'), '');
     final decDigits = commaIndex == -1
         ? ''
-        : newValue.text
-            .substring(commaIndex + 1)
-            .replaceAll(RegExp(r'[^0-9]'), '');
+        : text.substring(commaIndex + 1).replaceAll(RegExp(r'[^0-9]'), '');
 
     final groupedInt = _groupThousands(intDigits);
     final formatted =

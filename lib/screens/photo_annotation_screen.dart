@@ -8,6 +8,7 @@ import '../models/modules/file_module.dart';
 import '../state/project_store.dart';
 import '../state/settings_store.dart';
 import '../utils/id_generator.dart';
+import '../utils/safe_notify.dart';
 import '../widgets/app_bar.dart';
 
 // Foto mit Kommentar-Pins und Messungen. Gedrückt-halten = Kommentar an
@@ -79,21 +80,25 @@ class _PhotoAnnotationScreenState extends State<PhotoAnnotationScreen> {
                 if (controller.text.trim().isEmpty) return;
                 final actor =
                     context.read<SettingsStore>().currentUserKurzzeichen;
-                context.read<ProjectStore>().addImageAnnotation(
-                      widget.projectId,
-                      widget.gewerkId,
-                      widget.moduleId,
-                      widget.entryId,
-                      ImageAnnotation(
-                        id: newId(),
-                        type: ImageAnnotation.typeComment,
-                        x: norm.dx,
-                        y: norm.dy,
-                        text: controller.text.trim(),
-                        createdBy: actor,
-                      ),
-                    );
-                Navigator.pop(dialogContext);
+                final store = context.read<ProjectStore>();
+                final annotation = ImageAnnotation(
+                  id: newId(),
+                  type: ImageAnnotation.typeComment,
+                  x: norm.dx,
+                  y: norm.dy,
+                  text: controller.text.trim(),
+                  createdBy: actor,
+                );
+                popDialogThen(
+                  dialogContext,
+                  () => store.addImageAnnotation(
+                    widget.projectId,
+                    widget.gewerkId,
+                    widget.moduleId,
+                    widget.entryId,
+                    annotation,
+                  ),
+                );
               },
               child: const Text("Speichern"),
             ),
@@ -128,23 +133,27 @@ class _PhotoAnnotationScreenState extends State<PhotoAnnotationScreen> {
                 if (controller.text.trim().isEmpty) return;
                 final actor =
                     context.read<SettingsStore>().currentUserKurzzeichen;
-                context.read<ProjectStore>().addImageAnnotation(
-                      widget.projectId,
-                      widget.gewerkId,
-                      widget.moduleId,
-                      widget.entryId,
-                      ImageAnnotation(
-                        id: newId(),
-                        type: ImageAnnotation.typeMeasurement,
-                        x: start.dx,
-                        y: start.dy,
-                        x2: end.dx,
-                        y2: end.dy,
-                        text: controller.text.trim(),
-                        createdBy: actor,
-                      ),
-                    );
-                Navigator.pop(dialogContext);
+                final store = context.read<ProjectStore>();
+                final annotation = ImageAnnotation(
+                  id: newId(),
+                  type: ImageAnnotation.typeMeasurement,
+                  x: start.dx,
+                  y: start.dy,
+                  x2: end.dx,
+                  y2: end.dy,
+                  text: controller.text.trim(),
+                  createdBy: actor,
+                );
+                popDialogThen(
+                  dialogContext,
+                  () => store.addImageAnnotation(
+                    widget.projectId,
+                    widget.gewerkId,
+                    widget.moduleId,
+                    widget.entryId,
+                    annotation,
+                  ),
+                );
               },
               child: const Text("Speichern"),
             ),
@@ -170,14 +179,17 @@ class _PhotoAnnotationScreenState extends State<PhotoAnnotationScreen> {
           actions: [
             TextButton(
               onPressed: () {
-                context.read<ProjectStore>().removeImageAnnotation(
-                      widget.projectId,
-                      widget.gewerkId,
-                      widget.moduleId,
-                      widget.entryId,
-                      annotation.id,
-                    );
-                Navigator.pop(dialogContext);
+                final store = context.read<ProjectStore>();
+                popDialogThen(
+                  dialogContext,
+                  () => store.removeImageAnnotation(
+                    widget.projectId,
+                    widget.gewerkId,
+                    widget.moduleId,
+                    widget.entryId,
+                    annotation.id,
+                  ),
+                );
               },
               child: const Text("Löschen"),
             ),

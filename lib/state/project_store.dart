@@ -62,8 +62,17 @@ class ProjectStore extends ChangeNotifier {
     } catch (_) {
       projects = [];
     }
+    // Direkt lokal sichern statt erst auf die nächste ohnehin anstehende
+    // Änderung zu warten - sonst wächst die gespeicherte JSON-Datei bei
+    // einer rein lesend genutzten Session (kein Edit) trotz Pruning nie.
+    var prunedAnything = false;
     for (final project in projects) {
-      project.pruneTombstones();
+      if (project.pruneTombstones()) prunedAnything = true;
+    }
+    if (prunedAnything) {
+      try {
+        await _repository.saveProjects(projects);
+      } catch (_) {}
     }
     isLoading = false;
     notifyListeners();
@@ -1528,10 +1537,16 @@ class ProjectStore extends ChangeNotifier {
     await _persist(projectId);
   }
 
-  // Entfernt einen einzelnen Helfer aus einem bereits erfassten Tag, ohne
-  // die Stunden anzupassen (reine Korrektur der Namensliste, z.B. wenn
-  // jemand versehentlich für den falschen Tag eingetragen wurde) - anders
-  // als removeHelperSignup, das zum passenden Helferbedarf-Eintrag gehört.
+  // Entfernt einen einzelnen Helfer aus einem bereits erfassten Tag (reine
+  // Korrektur der Namensliste, z.B. wenn jemand versehentlich für den
+  // falschen Tag eingetragen wurde) - anders als removeHelperSignup, das
+  // zum passenden Helferbedarf-Eintrag gehört. Muss dabei auch die
+  // per-Person automatisch erfassten Stunden-Beiträge (Quelle 'helper' oder
+  // 'presence', siehe _addTimeTrackingHours) mit entfernen: sonst hält
+  // _addTimeTrackingHours die Person fälschlich für "noch nicht erfasst"
+  // (die Prüfung basiert auf helperNames), fügt beim nächsten
+  // Anwesenheits-Sync denselben Beitrag ein zweites Mal mit derselben ID
+  // hinzu, und WorkDayEntry.hours zählt ihn doppelt.
   Future<void> removeWorkDayHelper(
     String projectId,
     String entryId,
@@ -1546,6 +1561,11 @@ class ProjectStore extends ChangeNotifier {
     if (entry == null) return;
     entry.helperNames.removeWhere((p) => p.person == person);
     project.deletedIds['helper:$entryId:$person'] = DateTime.now();
+    for (final source in const ['helper', 'presence']) {
+      final contributionId = 'hourcontrib:$source:$entryId:$person';
+      entry.hourContributions.removeWhere((c) => c.id == contributionId);
+      project.deletedIds[contributionId] = DateTime.now();
+    }
     entry.updatedAt = DateTime.now();
     notifyListeners();
     await _persist(projectId);

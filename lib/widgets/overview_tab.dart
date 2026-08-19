@@ -10,6 +10,7 @@ import '../state/project_store.dart';
 import '../state/settings_store.dart';
 import '../utils/light_surface_colors.dart';
 import '../utils/name_capitalization.dart';
+import '../utils/safe_notify.dart';
 import '../utils/task_urgency.dart';
 import '../utils/time_picker_24h.dart';
 import 'audit_info_icon.dart';
@@ -443,15 +444,18 @@ class _OverviewTabState extends State<OverviewTab> {
                   onPressed: () {
                     final count = int.tryParse(countController.text.trim());
                     if (count == null || count <= 0) return;
-                    store.setHelperDemand(
-                      widget.project.id,
-                      from: from,
-                      to: to,
-                      neededCount: count,
-                      note: noteController.text.trim(),
-                      actor: actor,
+                    final note = noteController.text.trim();
+                    popDialogThen(
+                      dialogContext,
+                      () => store.setHelperDemand(
+                        widget.project.id,
+                        from: from,
+                        to: to,
+                        neededCount: count,
+                        note: note,
+                        actor: actor,
+                      ),
                     );
-                    Navigator.pop(dialogContext);
                   },
                   child: const Text("Speichern"),
                 ),
@@ -665,18 +669,19 @@ class _OverviewTabState extends State<OverviewTab> {
                   onPressed: () {
                     final names = splitNames(nameController.text);
                     if (names.isEmpty) return;
-                    for (final name in names) {
-                      store.addHelperSignupForRange(
-                        widget.project.id,
-                        from: from,
-                        to: to,
-                        name: name,
-                        startTime: showTime ? formatTime(startTime) : null,
-                        endTime: showTime ? formatTime(endTime) : null,
-                        actor: actor,
-                      );
-                    }
-                    Navigator.pop(dialogContext);
+                    popDialogThen(dialogContext, () {
+                      for (final name in names) {
+                        store.addHelperSignupForRange(
+                          widget.project.id,
+                          from: from,
+                          to: to,
+                          name: name,
+                          startTime: showTime ? formatTime(startTime) : null,
+                          endTime: showTime ? formatTime(endTime) : null,
+                          actor: actor,
+                        );
+                      }
+                    });
                   },
                   child: const Text("Speichern"),
                 ),

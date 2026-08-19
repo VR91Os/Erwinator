@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 
 import '../../state/project_store.dart';
+import '../../utils/safe_notify.dart';
 
 void showNewProjectDialog(BuildContext context) {
   final nameController = TextEditingController();
@@ -40,14 +41,15 @@ void showNewProjectDialog(BuildContext context) {
           ),
           ElevatedButton(
             onPressed: () {
-              if (nameController.text.trim().isEmpty) {
+              final name = nameController.text.trim();
+              if (name.isEmpty) {
                 return;
               }
-              store.addProject(
-                nameController.text.trim(),
-                address: addressController.text.trim(),
+              final address = addressController.text.trim();
+              popDialogThen(
+                dialogContext,
+                () => store.addProject(name, address: address),
               );
-              Navigator.pop(dialogContext);
             },
             child: const Text("Erstellen"),
           ),

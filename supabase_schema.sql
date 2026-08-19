@@ -75,6 +75,14 @@ create policy "see own or owner sees all" on project_members
 create policy "owner can update status" on project_members
   for update using (is_project_owner(project_id));
 
+-- Erlaubt einer abgelehnten Person, per erneuter Beitrittsanfrage
+-- (upsert in requestToJoin) ihre eigene Zeile auf "pending" zurückzusetzen.
+-- "with check" verhindert dabei eine Selbst-Genehmigung (status muss
+-- "pending" bleiben) - nur der Owner darf auf "approved"/"rejected" setzen.
+create policy "member can re-request after rejection" on project_members
+  for update using (user_id = auth.uid())
+  with check (user_id = auth.uid() and status = 'pending');
+
 -- Realtime aktivieren, damit Beitrittsanfragen und Projekt-Updates live
 -- ankommen (ohne manuelles Neuladen).
 alter publication supabase_realtime add table shared_projects, project_members;

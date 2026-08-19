@@ -8,6 +8,7 @@ import '../screens/time_profiles_screen.dart';
 import '../state/project_store.dart';
 import '../state/settings_store.dart';
 import '../utils/light_surface_colors.dart';
+import '../utils/safe_notify.dart';
 import '../utils/time_picker_24h.dart';
 
 String _formatTime(TimeOfDay t) =>
@@ -483,16 +484,9 @@ void _showManualTimeDialog(BuildContext context, Project project) {
                         final days = Set<DateTime>.from(selectedDays);
                         final startTime = _formatTime(start);
                         final endTime = _formatTime(end);
-                        Navigator.pop(dialogContext);
-                        // Erst nach dem aktuellen Frame speichern (wie beim
-                        // Reiter-/Modul-Reorder in gewerke_screen.dart):
-                        // store.addManualTimeEntry löst über notifyListeners()
-                        // einen Provider-weiten Rebuild aus - passiert das
-                        // noch synchron, während Navigator.pop den Dialog
-                        // gerade abbaut, kollidiert das mit dessen Element-
-                        // Abbau ("_dependents.isEmpty"-Assertion).
-                        WidgetsBinding.instance.addPostFrameCallback((_) {
-                          store.addManualTimeEntry(
+                        popDialogThen(
+                          dialogContext,
+                          () => store.addManualTimeEntry(
                             project.id,
                             days: days,
                             startTime: startTime,
@@ -500,8 +494,8 @@ void _showManualTimeDialog(BuildContext context, Project project) {
                             breakMinutes: breakMinutes,
                             personCount: personCount,
                             actor: actor,
-                          );
-                        });
+                          ),
+                        );
                       },
                 child: const Text("Hinzufügen"),
               ),
@@ -564,19 +558,15 @@ void _showQuickHoursDialog(BuildContext context, Project project) {
                   hoursController.text.trim().replaceAll(',', '.'));
               if (hours == null || hours <= 0) return;
               final note = noteController.text;
-              Navigator.pop(dialogContext);
-              // Erst nach dem aktuellen Frame speichern (siehe
-              // _showManualTimeDialog oben) - vermeidet die
-              // "_dependents.isEmpty"-Assertion durch einen Provider-Rebuild
-              // während Navigator.pop den Dialog noch abbaut.
-              WidgetsBinding.instance.addPostFrameCallback((_) {
-                store.addQuickHourEntry(
+              popDialogThen(
+                dialogContext,
+                () => store.addQuickHourEntry(
                   project.id,
                   hours: hours,
                   note: note,
                   actor: actor,
-                );
-              });
+                ),
+              );
             },
             child: const Text("Hinzufügen"),
           ),
@@ -667,13 +657,15 @@ void _showEditDayDialog(
                   final hours = double.tryParse(
                       hoursController.text.trim().replaceAll(',', '.'));
                   if (hours == null || hours < 0) return;
-                  store.updateWorkDayEntryHours(
-                    project.id,
-                    entry.id,
-                    hours: hours,
-                    actor: actor,
+                  popDialogThen(
+                    dialogContext,
+                    () => store.updateWorkDayEntryHours(
+                      project.id,
+                      entry.id,
+                      hours: hours,
+                      actor: actor,
+                    ),
                   );
-                  Navigator.pop(dialogContext);
                 },
                 child: const Text("Speichern"),
               ),
@@ -708,8 +700,10 @@ void _confirmDeleteDay(
         ElevatedButton(
           style: ElevatedButton.styleFrom(backgroundColor: Colors.red),
           onPressed: () {
-            store.removeWorkDayEntry(project.id, entry.id);
-            Navigator.pop(dialogContext);
+            popDialogThen(
+              dialogContext,
+              () => store.removeWorkDayEntry(project.id, entry.id),
+            );
           },
           child: const Text("Löschen"),
         ),

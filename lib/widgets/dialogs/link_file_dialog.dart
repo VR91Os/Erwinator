@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import '../../models/project.dart';
 import '../../utils/file_type_utils.dart';
 import '../../utils/project_file_lookup.dart';
+import '../../utils/safe_notify.dart';
 
 // Projektweite Auswahl einer bereits vorhandenen Datei (aus jedem Gewerk),
 // um sie mit einer Aufgabe zu verknüpfen - z.B. ein bereits hochgeladenes
@@ -33,10 +34,8 @@ void showLinkFileDialog(
                       leading: Icon(fileTypeIcon(loc.entry.fileType)),
                       title: Text(loc.entry.name),
                       subtitle: Text('${loc.gewerk.name} · ${loc.module.label.isEmpty ? fileTypeLabel(loc.entry.fileType) : loc.module.label}'),
-                      onTap: () {
-                        Navigator.pop(dialogContext);
-                        onPicked(loc.entry.id);
-                      },
+                      onTap: () =>
+                          popDialogThen(dialogContext, () => onPicked(loc.entry.id)),
                     );
                   }).toList(),
                 ),

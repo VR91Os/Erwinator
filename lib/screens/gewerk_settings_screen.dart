@@ -1,7 +1,9 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 
+import '../models/project.dart';
 import '../state/project_store.dart';
+import '../utils/safe_notify.dart';
 import '../widgets/app_bar.dart';
 
 // Optionen für einen einzelnen Gewerk-Reiter: Gewerk umbenennen oder
@@ -68,11 +70,11 @@ class _GewerkSettingsScreenState extends State<GewerkSettingsScreen> {
             ElevatedButton(
               style: ElevatedButton.styleFrom(backgroundColor: Colors.red),
               onPressed: () {
-                context
-                    .read<ProjectStore>()
-                    .removeGewerk(widget.projectId, widget.gewerkId);
-                Navigator.pop(dialogContext);
-                Navigator.pop(context);
+                final store = context.read<ProjectStore>();
+                popDialogThen(dialogContext, () {
+                  store.removeGewerk(widget.projectId, widget.gewerkId);
+                  if (mounted) Navigator.pop(context);
+                });
               },
               child: const Text("Löschen"),
             ),
@@ -85,8 +87,21 @@ class _GewerkSettingsScreenState extends State<GewerkSettingsScreen> {
   @override
   Widget build(BuildContext context) {
     final store = context.watch<ProjectStore>();
-    final project =
-        store.projects.firstWhere((p) => p.id == widget.projectId);
+
+    Project? foundProject;
+    for (final p in store.projects) {
+      if (p.id == widget.projectId) foundProject = p;
+    }
+    if (foundProject == null) {
+      // Projekt wurde inzwischen gelöscht (z.B. durch Sync von einem
+      // anderen Gerät, während dieser Screen offen war) -> statt
+      // abzustürzen einfach zurück.
+      return Scaffold(
+        appBar: buildAppBar("Optionen", context, true),
+        body: const Center(child: Text("Dieses Projekt existiert nicht mehr.")),
+      );
+    }
+    final project = foundProject;
 
     return Scaffold(
       appBar: buildAppBar("Optionen – ${widget.initialName}", context, true),

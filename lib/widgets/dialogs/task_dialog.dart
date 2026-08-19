@@ -6,6 +6,7 @@ import '../../models/task.dart';
 import '../../state/project_store.dart';
 import '../../state/settings_store.dart';
 import '../../utils/id_generator.dart';
+import '../../utils/safe_notify.dart';
 
 void showTaskDialog(
   BuildContext context,
@@ -136,14 +137,15 @@ void showTaskDialog(
                     ],
                   );
 
-                  store.addTaskToTodoModule(
-                    projectId,
-                    gewerkId,
-                    moduleId,
-                    newTask,
+                  popDialogThen(
+                    dialogContext,
+                    () => store.addTaskToTodoModule(
+                      projectId,
+                      gewerkId,
+                      moduleId,
+                      newTask,
+                    ),
                   );
-
-                  Navigator.pop(dialogContext);
                 },
                 child: const Text("Speichern"),
               ),

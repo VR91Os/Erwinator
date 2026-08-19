@@ -19,6 +19,7 @@ import '../utils/id_generator.dart';
 import '../utils/image_storage.dart';
 import '../utils/large_file_confirm.dart';
 import '../utils/project_file_lookup.dart';
+import '../utils/safe_notify.dart';
 import '../widgets/app_bar.dart';
 import '../widgets/dialogs/finance_entry_dialog.dart';
 import '../widgets/dialogs/link_file_dialog.dart';
@@ -346,10 +347,14 @@ class TaskDetailScreen extends StatelessWidget {
             ),
             ElevatedButton(
               onPressed: () {
-                Navigator.pop(dialogContext);
-                context.read<ProjectStore>().renameTask(
-                    projectId, gewerkId, moduleId, task.id,
-                    name: controller.text, actor: actor);
+                final store = context.read<ProjectStore>();
+                final name = controller.text;
+                popDialogThen(
+                  dialogContext,
+                  () => store.renameTask(
+                      projectId, gewerkId, moduleId, task.id,
+                      name: name, actor: actor),
+                );
               },
               child: const Text("Speichern"),
             ),
@@ -379,10 +384,14 @@ class TaskDetailScreen extends StatelessWidget {
             ),
             ElevatedButton(
               onPressed: () {
-                Navigator.pop(dialogContext);
-                context.read<ProjectStore>().updateTaskDescription(
-                    projectId, gewerkId, moduleId, task.id,
-                    description: controller.text, actor: actor);
+                final store = context.read<ProjectStore>();
+                final description = controller.text;
+                popDialogThen(
+                  dialogContext,
+                  () => store.updateTaskDescription(
+                      projectId, gewerkId, moduleId, task.id,
+                      description: description, actor: actor),
+                );
               },
               child: const Text("Speichern"),
             ),

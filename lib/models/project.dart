@@ -248,9 +248,14 @@ class Project {
   // immer weiter. Nach dieser Frist ist "Edit schlägt Delete" ohnehin nicht
   // mehr relevant: kein Gerät dürfte so lange offline sein, dass es noch
   // eine ältere, unbearbeitete Kopie des gelöschten Elements hält.
-  void pruneTombstones({Duration retention = const Duration(days: 180)}) {
+  // Gibt zurück, ob tatsächlich etwas entfernt wurde, damit der Aufrufer nur
+  // bei einer echten Änderung neu persistiert statt bei jedem App-Start
+  // unnötig zu schreiben.
+  bool pruneTombstones({Duration retention = const Duration(days: 180)}) {
     final cutoff = DateTime.now().subtract(retention);
+    final before = deletedIds.length;
     deletedIds.removeWhere((_, deletedAt) => deletedAt.isBefore(cutoff));
+    return deletedIds.length != before;
   }
 
   WorkTimeProfile? get activeWorkTimeProfile {

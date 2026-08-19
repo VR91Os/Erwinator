@@ -6,6 +6,7 @@ import '../state/project_store.dart';
 import '../state/settings_store.dart';
 import '../utils/holidays.dart';
 import '../utils/kurzzeichen.dart';
+import '../utils/safe_notify.dart';
 import '../widgets/app_bar.dart';
 import 'error_log_screen.dart';
 
@@ -86,12 +87,14 @@ class _SettingsScreenState extends State<SettingsScreen> {
             ),
             ElevatedButton(
               onPressed: () {
-                if (nameController.text.trim().isEmpty) return;
-                context.read<SettingsStore>().addInvitedUser(
-                      name: nameController.text.trim(),
-                      email: emailController.text.trim(),
-                    );
-                Navigator.pop(dialogContext);
+                final name = nameController.text.trim();
+                if (name.isEmpty) return;
+                final email = emailController.text.trim();
+                final store = context.read<SettingsStore>();
+                popDialogThen(
+                  dialogContext,
+                  () => store.addInvitedUser(name: name, email: email),
+                );
               },
               child: const Text("Hinzufügen"),
             ),

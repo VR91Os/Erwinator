@@ -74,8 +74,12 @@ class Task {
             .map((e) => e as String)
             .toList(),
         createdBy: map['createdBy'] as String? ?? "User",
-        createdAt: DateTime.parse(map['createdAt'] as String),
-        updatedAt: DateTime.parse(map['updatedAt'] as String),
+        createdAt: map['createdAt'] == null
+            ? DateTime.fromMillisecondsSinceEpoch(0)
+            : DateTime.parse(map['createdAt'] as String),
+        updatedAt: map['updatedAt'] == null
+            ? DateTime.fromMillisecondsSinceEpoch(0)
+            : DateTime.parse(map['updatedAt'] as String),
         history: (map['history'] as List<dynamic>? ?? [])
             .map((e) => AuditEntry.fromMap(e as Map<String, dynamic>))
             .toList(),

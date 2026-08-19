@@ -12,6 +12,7 @@ import '../../models/project.dart';
 import '../../state/project_store.dart';
 import '../../state/settings_store.dart';
 import '../../utils/name_capitalization.dart';
+import '../../utils/safe_notify.dart';
 import '../audit_info_icon.dart';
 import 'module_card.dart';
 
@@ -220,14 +221,7 @@ class ContactModuleWidget extends StatelessWidget {
                   if (!proceed) return;
                 }
                 if (dialogContext.mounted) Navigator.pop(dialogContext);
-                // Erst nach dem aktuellen Frame speichern (siehe
-                // time_tracking_section.dart _showManualTimeDialog): die
-                // store.addContactPerson-Aufrufe lösen über notifyListeners()
-                // einen Provider-weiten Rebuild aus - passiert das noch
-                // synchron, während Navigator.pop den Dialog gerade abbaut,
-                // kollidiert das mit dessen Element-Abbau
-                // ("_dependents.isEmpty"-Assertion).
-                WidgetsBinding.instance.addPostFrameCallback((_) {
+                deferredNotify(() {
                   for (final name in names) {
                     store.addContactPerson(
                       projectId,

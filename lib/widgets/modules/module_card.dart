@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 
 import '../../state/project_store.dart';
+import '../../utils/safe_notify.dart';
 
 class ModuleCard extends StatelessWidget {
   final String projectId;
@@ -41,10 +42,11 @@ class ModuleCard extends StatelessWidget {
             ElevatedButton(
               style: ElevatedButton.styleFrom(backgroundColor: Colors.red),
               onPressed: () {
-                Navigator.pop(dialogContext);
-                context
-                    .read<ProjectStore>()
-                    .removeModule(projectId, gewerkId, moduleId);
+                final store = context.read<ProjectStore>();
+                popDialogThen(
+                  dialogContext,
+                  () => store.removeModule(projectId, gewerkId, moduleId),
+                );
               },
               child: const Text("Entfernen"),
             ),
@@ -76,13 +78,13 @@ class ModuleCard extends StatelessWidget {
             ),
             ElevatedButton(
               onPressed: () {
-                context.read<ProjectStore>().renameModule(
-                      projectId,
-                      gewerkId,
-                      moduleId,
-                      controller.text.trim(),
-                    );
-                Navigator.pop(dialogContext);
+                final store = context.read<ProjectStore>();
+                final name = controller.text.trim();
+                popDialogThen(
+                  dialogContext,
+                  () => store.renameModule(
+                      projectId, gewerkId, moduleId, name),
+                );
               },
               child: const Text("Speichern"),
             ),

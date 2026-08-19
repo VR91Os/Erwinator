@@ -1,9 +1,11 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 
+import '../models/project.dart';
 import '../models/time_tracking.dart';
 import '../state/project_store.dart';
 import '../utils/id_generator.dart';
+import '../utils/safe_notify.dart';
 import '../utils/time_picker_24h.dart';
 import '../widgets/app_bar.dart';
 
@@ -72,7 +74,21 @@ class TimeProfilesScreen extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final store = context.watch<ProjectStore>();
-    final project = store.projects.firstWhere((p) => p.id == projectId);
+
+    Project? foundProject;
+    for (final p in store.projects) {
+      if (p.id == projectId) foundProject = p;
+    }
+    if (foundProject == null) {
+      // Projekt wurde inzwischen gelöscht (z.B. durch Sync von einem
+      // anderen Gerät, während dieser Screen offen war) -> statt
+      // abzustürzen einfach zurück.
+      return Scaffold(
+        appBar: buildAppBar("Arbeitszeit-Profile", context, true),
+        body: const Center(child: Text("Dieses Projekt existiert nicht mehr.")),
+      );
+    }
+    final project = foundProject;
     final profiles = project.workTimeProfiles;
 
     return Scaffold(
@@ -224,92 +240,102 @@ void _showProfileEditorDialog(
           return AlertDialog(
             title:
                 Text(existing == null ? "Neues Profil" : "Profil bearbeiten"),
-            content: SingleChildScrollView(
-              child: Column(
-                mainAxisSize: MainAxisSize.min,
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  TextField(
-                    controller: nameController,
-                    decoration: const InputDecoration(
-                      labelText: "Name *",
-                      hintText: "z.B. Kurzer Tag, Lange Woche",
-                    ),
-                  ),
-                  const SizedBox(height: 12),
-                  for (var i = 0; i < 7; i++)
-                    Padding(
-                      padding: const EdgeInsets.only(bottom: 4),
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          CheckboxListTile(
-                            contentPadding: EdgeInsets.zero,
-                            dense: true,
-                            controlAffinity: ListTileControlAffinity.leading,
-                            title: Text(_weekdayLabels[i]),
-                            value: rows[i].enabled,
-                            onChanged: (value) => setDialogState(
-                                () => rows[i].enabled = value ?? false),
-                          ),
-                          if (rows[i].enabled)
-                            Padding(
-                              padding: const EdgeInsets.only(left: 32),
-                              child: Row(
-                                children: [
-                                  Expanded(
-                                    child: OutlinedButton(
-                                      onPressed: () async {
-                                        final picked = await show24hTimePicker(
-                                          context: context,
-                                          initialTime: rows[i].start,
-                                        );
-                                        if (picked != null) {
-                                          setDialogState(
-                                              () => rows[i].start = picked);
-                                        }
-                                      },
-                                      child: Text(
-                                          "Von ${_formatTime(rows[i].start)}"),
-                                    ),
-                                  ),
-                                  const SizedBox(width: 6),
-                                  Expanded(
-                                    child: OutlinedButton(
-                                      onPressed: () async {
-                                        final picked = await show24hTimePicker(
-                                          context: context,
-                                          initialTime: rows[i].end,
-                                        );
-                                        if (picked != null) {
-                                          setDialogState(
-                                              () => rows[i].end = picked);
-                                        }
-                                      },
-                                      child: Text(
-                                          "Bis ${_formatTime(rows[i].end)}"),
-                                    ),
-                                  ),
-                                  const SizedBox(width: 6),
-                                  SizedBox(
-                                    width: 72,
-                                    child: TextField(
-                                      controller: rows[i].breakController,
-                                      keyboardType: TextInputType.number,
-                                      decoration: const InputDecoration(
-                                        labelText: "Pause",
-                                        suffixText: "min",
-                                        isDense: true,
-                                      ),
-                                    ),
-                                  ),
-                                ],
-                              ),
-                            ),
-                        ],
+            content: SizedBox(
+              width: double.maxFinite,
+              child: SingleChildScrollView(
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    TextField(
+                      controller: nameController,
+                      decoration: const InputDecoration(
+                        labelText: "Name *",
+                        hintText: "z.B. Kurzer Tag, Lange Woche",
                       ),
                     ),
-                ],
+                    const SizedBox(height: 12),
+                    for (var i = 0; i < 7; i++)
+                      Padding(
+                        padding: const EdgeInsets.only(bottom: 4),
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            CheckboxListTile(
+                              contentPadding: EdgeInsets.zero,
+                              dense: true,
+                              controlAffinity:
+                                  ListTileControlAffinity.leading,
+                              title: Text(_weekdayLabels[i]),
+                              value: rows[i].enabled,
+                              onChanged: (value) => setDialogState(
+                                  () => rows[i].enabled = value ?? false),
+                            ),
+                            if (rows[i].enabled)
+                              Padding(
+                                padding: const EdgeInsets.only(left: 32),
+                                child: Row(
+                                  children: [
+                                    Expanded(
+                                      child: OutlinedButton(
+                                        onPressed: () async {
+                                          final picked =
+                                              await show24hTimePicker(
+                                            context: context,
+                                            initialTime: rows[i].start,
+                                          );
+                                          if (picked != null) {
+                                            setDialogState(
+                                                () => rows[i].start = picked);
+                                          }
+                                        },
+                                        child: Text(
+                                          "Von ${_formatTime(rows[i].start)}",
+                                          textAlign: TextAlign.center,
+                                        ),
+                                      ),
+                                    ),
+                                    const SizedBox(width: 6),
+                                    Expanded(
+                                      child: OutlinedButton(
+                                        onPressed: () async {
+                                          final picked =
+                                              await show24hTimePicker(
+                                            context: context,
+                                            initialTime: rows[i].end,
+                                          );
+                                          if (picked != null) {
+                                            setDialogState(
+                                                () => rows[i].end = picked);
+                                          }
+                                        },
+                                        child: Text(
+                                          "Bis ${_formatTime(rows[i].end)}",
+                                          textAlign: TextAlign.center,
+                                        ),
+                                      ),
+                                    ),
+                                    const SizedBox(width: 6),
+                                    SizedBox(
+                                      width: 72,
+                                      child: TextField(
+                                        controller: rows[i].breakController,
+                                        keyboardType: TextInputType.number,
+                                        decoration: const InputDecoration(
+                                          labelText: "Pause",
+                                          suffixText: "min",
+                                          isDense: true,
+                                        ),
+                                      ),
+                                    ),
+                                  ],
+                                ),
+                              ),
+                          ],
+                        ),
+                      ),
+                  ],
+                ),
               ),
             ),
             actions: [
@@ -338,12 +364,13 @@ void _showProfileEditorDialog(
                     name: name,
                     schedules: schedules,
                   );
-                  if (existing == null) {
-                    store.addWorkTimeProfile(projectId, profile);
-                  } else {
-                    store.updateWorkTimeProfile(projectId, profile);
-                  }
-                  Navigator.pop(dialogContext);
+                  popDialogThen(dialogContext, () {
+                    if (existing == null) {
+                      store.addWorkTimeProfile(projectId, profile);
+                    } else {
+                      store.updateWorkTimeProfile(projectId, profile);
+                    }
+                  });
                 },
                 child: const Text("Speichern"),
               ),

@@ -9,6 +9,7 @@ import '../../state/settings_store.dart';
 import '../../utils/amount_format.dart';
 import '../../utils/finance_detection.dart';
 import '../../utils/id_generator.dart';
+import '../../utils/safe_notify.dart';
 
 // Normaler österreichischer Umsatzsteuersatz - nur als Rechenhilfe, falls
 // Netto/Brutto weder im PDF erkannt noch manuell eingetragen wurde. Ergibt
@@ -235,8 +236,10 @@ void showFinanceEntryDialog(
               if (existing != null)
                 TextButton(
                   onPressed: () {
-                    Navigator.pop(dialogContext);
-                    store.removeFinanceEntry(projectId, existing.id);
+                    popDialogThen(
+                      dialogContext,
+                      () => store.removeFinanceEntry(projectId, existing.id),
+                    );
                   },
                   style: TextButton.styleFrom(foregroundColor: Colors.red),
                   child: const Text("Löschen"),
@@ -251,40 +254,41 @@ void showFinanceEntryDialog(
                   final resolvedGewerkId = gewerkId;
                   if (gross == null || resolvedGewerkId == null) return;
                   final net = parseAmount(netController.text);
-                  Navigator.pop(dialogContext);
-
-                  if (existing == null) {
-                    store.addFinanceEntry(
-                      projectId,
-                      FinanceEntry(
-                        id: newId(),
-                        gewerkId: resolvedGewerkId,
-                        fileModuleId: fileModuleId,
-                        fileEntryId: fileEntryId,
-                        documentType: documentType,
-                        amountGross: gross,
-                        amountNet: net,
-                        date: date,
-                        note: noteController.text.trim(),
-                        autoDetected: autoDetected,
-                        createdBy: actor,
-                        history: [
-                          AuditEntry(kurzzeichen: actor, action: 'erfasst'),
-                        ],
-                      ),
-                    );
-                  } else {
-                    existing.gewerkId = resolvedGewerkId;
-                    existing.documentType = documentType;
-                    existing.amountGross = gross;
-                    existing.amountNet = net;
-                    existing.date = date;
-                    existing.note = noteController.text.trim();
-                    existing.updatedAt = DateTime.now();
-                    existing.history
-                        .add(AuditEntry(kurzzeichen: actor, action: 'bearbeitet'));
-                    store.updateFinanceEntry(projectId, existing);
-                  }
+                  final note = noteController.text.trim();
+                  popDialogThen(dialogContext, () {
+                    if (existing == null) {
+                      store.addFinanceEntry(
+                        projectId,
+                        FinanceEntry(
+                          id: newId(),
+                          gewerkId: resolvedGewerkId,
+                          fileModuleId: fileModuleId,
+                          fileEntryId: fileEntryId,
+                          documentType: documentType,
+                          amountGross: gross,
+                          amountNet: net,
+                          date: date,
+                          note: note,
+                          autoDetected: autoDetected,
+                          createdBy: actor,
+                          history: [
+                            AuditEntry(kurzzeichen: actor, action: 'erfasst'),
+                          ],
+                        ),
+                      );
+                    } else {
+                      existing.gewerkId = resolvedGewerkId;
+                      existing.documentType = documentType;
+                      existing.amountGross = gross;
+                      existing.amountNet = net;
+                      existing.date = date;
+                      existing.note = note;
+                      existing.updatedAt = DateTime.now();
+                      existing.history.add(
+                          AuditEntry(kurzzeichen: actor, action: 'bearbeitet'));
+                      store.updateFinanceEntry(projectId, existing);
+                    }
+                  });
                 },
                 child: const Text("Speichern"),
               ),

@@ -11,6 +11,7 @@ import '../utils/file_export.dart';
 import '../utils/ics_export.dart';
 import '../state/settings_store.dart';
 import '../utils/profile_prompt.dart';
+import '../utils/safe_notify.dart';
 import '../widgets/app_bar.dart';
 import 'share_project_screen.dart';
 
@@ -113,7 +114,21 @@ class _OverviewSettingsScreenState extends State<OverviewSettingsScreen> {
   Widget build(BuildContext context) {
     final store = context.watch<ProjectStore>();
     final settingsStore = context.watch<SettingsStore>();
-    final project = store.projects.firstWhere((p) => p.id == widget.projectId);
+
+    Project? foundProject;
+    for (final p in store.projects) {
+      if (p.id == widget.projectId) foundProject = p;
+    }
+    if (foundProject == null) {
+      // Projekt wurde inzwischen gelöscht (z.B. durch Sync von einem
+      // anderen Gerät, während dieser Screen offen war) -> statt
+      // abzustürzen einfach zurück.
+      return Scaffold(
+        appBar: buildAppBar("Optionen", context, true),
+        body: const Center(child: Text("Dieses Projekt existiert nicht mehr.")),
+      );
+    }
+    final project = foundProject;
 
     return Scaffold(
       appBar: buildAppBar("Optionen – Überblick", context, true),
@@ -402,12 +417,15 @@ class _OverviewSettingsScreenState extends State<OverviewSettingsScreen> {
             ElevatedButton(
               style: ElevatedButton.styleFrom(backgroundColor: Colors.red),
               onPressed: () {
-                Navigator.pop(dialogContext);
-                context.read<ProjectStore>().removeProject(project.id);
-                // Zurück bis zum Start-Bildschirm - das gelöschte Projekt
-                // existiert nicht mehr, GewerkeScreen darüber im Stack
-                // würde sonst mit einer leeren firstWhere() abstürzen.
-                Navigator.of(context).popUntil((route) => route.isFirst);
+                final store = context.read<ProjectStore>();
+                popDialogThen(dialogContext, () {
+                  store.removeProject(project.id);
+                  if (!mounted) return;
+                  // Zurück bis zum Start-Bildschirm - das gelöschte Projekt
+                  // existiert nicht mehr, GewerkeScreen darüber im Stack
+                  // würde sonst mit einer leeren firstWhere() abstürzen.
+                  Navigator.of(context).popUntil((route) => route.isFirst);
+                });
               },
               child: const Text("Endgültig löschen"),
             ),

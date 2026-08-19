@@ -57,14 +57,25 @@ class _JoinProjectScreenState extends State<JoinProjectScreen> {
       _error = null;
     });
     try {
-      final settings = context.read<SettingsStore>().settings;
-      await _sharingService.requestToJoin(
-        code,
-        displayName: name,
-        kurzzeichen:
-            settings.userInitials.isEmpty ? null : settings.userInitials,
-      );
       final userId = await _sharingService.ensureSignedIn();
+      final existingStatus = await _sharingService.myMembershipStatus(code);
+      if (existingStatus == ProjectMember.statusApproved) {
+        // Bereits Mitglied (z.B. Code/QR erneut eingegeben) – nicht erneut
+        // anfragen, das würde den Status sonst auf "pending" zurücksetzen.
+        if (!mounted) return;
+        await _onApproved(code);
+        return;
+      }
+      if (existingStatus != ProjectMember.statusPending) {
+        if (!mounted) return;
+        final settings = context.read<SettingsStore>().settings;
+        await _sharingService.requestToJoin(
+          code,
+          displayName: name,
+          kurzzeichen:
+              settings.userInitials.isEmpty ? null : settings.userInitials,
+        );
+      }
       if (!mounted) return;
       setState(() {
         _requested = true;
