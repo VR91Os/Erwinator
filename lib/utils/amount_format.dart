@@ -81,8 +81,38 @@ class ThousandsSeparatorInputFormatter extends TextInputFormatter {
 
     // Der Tausenderpunkt wird unten automatisch eingefügt, Nutzer müssen ihn
     // nie selbst tippen. Ein manuell getipptes "." (z.B. Ziffernblock oder
-    // englisches Layout) kann daher nur als Dezimaltrenner gemeint sein.
-    final text = newValue.text.replaceAll('.', ',');
+    // englisches Layout) kann daher nur als Dezimaltrenner gemeint sein -
+    // ABER: newValue.text enthält bei jedem Tastendruck auch die von diesem
+    // Formatter im letzten Durchlauf selbst eingefügten Tausenderpunkte.
+    // Würde man einfach jeden "." im gesamten Text ersetzen, würde so ein
+    // alter Gruppierungspunkt beim nächsten Tippen fälschlich als frisch
+    // getippter Dezimaltrenner interpretiert (Komma "springt" nach ca. 4-5
+    // Ziffern automatisch hinein). Per Prefix/Suffix-Diff wird daher nur der
+    // tatsächlich neu eingefügte Abschnitt auf "." geprüft; unverändert
+    // übernommene Altbestandteile behalten ihre reine Gruppierungspunkte,
+    // die hier einfach entfernt (und unten neu berechnet) werden.
+    final oldText = oldValue.text;
+    final newText = newValue.text;
+    var prefixLen = 0;
+    while (prefixLen < oldText.length &&
+        prefixLen < newText.length &&
+        oldText[prefixLen] == newText[prefixLen]) {
+      prefixLen++;
+    }
+    var suffixLen = 0;
+    while (suffixLen < oldText.length - prefixLen &&
+        suffixLen < newText.length - prefixLen &&
+        oldText[oldText.length - 1 - suffixLen] ==
+            newText[newText.length - 1 - suffixLen]) {
+      suffixLen++;
+    }
+    final before = newText.substring(0, prefixLen).replaceAll('.', '');
+    final inserted = newText
+        .substring(prefixLen, newText.length - suffixLen)
+        .replaceAll('.', ',');
+    final after =
+        newText.substring(newText.length - suffixLen).replaceAll('.', '');
+    final text = '$before$inserted$after';
 
     final commaIndex = text.indexOf(',');
     final intSection = commaIndex == -1 ? text : text.substring(0, commaIndex);

@@ -826,12 +826,13 @@ class ProjectStore extends ChangeNotifier {
     required String name,
     String phone = '',
     String email = '',
+    String role = '',
     required String actor,
   }) async {
     final module = _module(projectId, gewerkId, moduleId);
     if (module is! ContactModule) return;
-    module.contacts.add(
-        ContactPerson(id: newId(), name: name, phone: phone, email: email));
+    module.contacts.add(ContactPerson(
+        id: newId(), name: name, phone: phone, email: email, role: role));
     module.history
         .add(AuditEntry(kurzzeichen: actor, action: 'Person hinzugefügt'));
     notifyListeners();
@@ -846,6 +847,7 @@ class ProjectStore extends ChangeNotifier {
     required String name,
     required String phone,
     String? email,
+    String? role,
     required String actor,
   }) async {
     final module = _module(projectId, gewerkId, moduleId);
@@ -858,6 +860,7 @@ class ProjectStore extends ChangeNotifier {
     person.name = name;
     person.phone = phone;
     if (email != null) person.email = email;
+    if (role != null) person.role = role;
     person.updatedAt = DateTime.now();
     module.history.add(AuditEntry(kurzzeichen: actor, action: 'bearbeitet'));
     notifyListeners();

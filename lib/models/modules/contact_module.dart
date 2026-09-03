@@ -12,6 +12,10 @@ class ContactPerson {
   // Nur erfasst/angezeigt, wenn Project.showContactEmail aktiv ist (siehe
   // overview_settings_screen.dart) - bleibt sonst leer.
   String email;
+  // Freitext-Zusatzoption zur Person, z.B. Gewerk/Rolle wie "Maurer",
+  // "Baumeister" - unabhängig vom (übergeordneten) Modul-Namen, da eine
+  // Person auch mehrere Rollen gleichzeitig haben kann.
+  String role;
   DateTime updatedAt;
 
   ContactPerson({
@@ -19,6 +23,7 @@ class ContactPerson {
     this.name = '',
     this.phone = '',
     this.email = '',
+    this.role = '',
     DateTime? updatedAt,
   }) : updatedAt = updatedAt ?? DateTime.now();
 
@@ -27,6 +32,7 @@ class ContactPerson {
         'name': name,
         'phone': phone,
         'email': email,
+        'role': role,
         'updatedAt': updatedAt.toIso8601String(),
       };
 
@@ -35,6 +41,7 @@ class ContactPerson {
         name: map['name'] as String? ?? '',
         phone: map['phone'] as String? ?? '',
         email: map['email'] as String? ?? '',
+        role: map['role'] as String? ?? '',
         updatedAt: map['updatedAt'] == null
             ? DateTime.fromMillisecondsSinceEpoch(0)
             : DateTime.parse(map['updatedAt'] as String),

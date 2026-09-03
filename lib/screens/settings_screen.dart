@@ -162,15 +162,18 @@ class _SettingsScreenState extends State<SettingsScreen> {
             "Namenskürzel (automatisch): $kurzzeichenPreview",
             style: const TextStyle(color: Colors.grey),
           ),
-          const SizedBox(height: 10),
-          TextField(
-            controller: _googleController,
-            decoration: const InputDecoration(
-              labelText: "Verknüpftes Google-Profil (für Kalender)",
-              helperText:
-                  "Wird nur gespeichert – echte Anmeldung folgt später.",
-            ),
-          ),
+          // Google-Kalender-Anbindung vorerst nicht weiterverfolgt (siehe
+          // Entscheidung 2026-08-28) - Eingabefeld daher ausgeblendet,
+          // _googleController/googleAccountEmail bleiben aber bestehen.
+          // const SizedBox(height: 10),
+          // TextField(
+          //   controller: _googleController,
+          //   decoration: const InputDecoration(
+          //     labelText: "Verknüpftes Google-Profil (für Kalender)",
+          //     helperText:
+          //         "Wird nur gespeichert – echte Anmeldung folgt später.",
+          //   ),
+          // ),
           const SizedBox(height: 10),
           Align(
             alignment: Alignment.centerRight,

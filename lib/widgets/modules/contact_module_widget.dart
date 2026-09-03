@@ -436,6 +436,8 @@ class _ContactPersonTile extends StatefulWidget {
 class _ContactPersonTileState extends State<_ContactPersonTile> {
   late final _emailController =
       TextEditingController(text: widget.person.email);
+  late final _roleController =
+      TextEditingController(text: widget.person.role);
 
   @override
   void didUpdateWidget(covariant _ContactPersonTile oldWidget) {
@@ -449,11 +451,16 @@ class _ContactPersonTileState extends State<_ContactPersonTile> {
         _emailController.text != widget.person.email) {
       _emailController.text = widget.person.email;
     }
+    if (oldWidget.person.role != widget.person.role &&
+        _roleController.text != widget.person.role) {
+      _roleController.text = widget.person.role;
+    }
   }
 
   @override
   void dispose() {
     _emailController.dispose();
+    _roleController.dispose();
     super.dispose();
   }
 
@@ -506,6 +513,32 @@ class _ContactPersonTileState extends State<_ContactPersonTile> {
                 ),
               ),
             ],
+          ),
+          Padding(
+            padding: const EdgeInsets.only(top: 6),
+            child: TextFormField(
+              controller: _roleController,
+              style: const TextStyle(fontSize: 13),
+              decoration: const InputDecoration(
+                isDense: true,
+                labelText: "Zusatzoption",
+                hintText: "z.B. Maurer, Baumeister",
+              ),
+              onFieldSubmitted: (value) {
+                final trimmed = value.trim();
+                if (trimmed != value) _roleController.text = trimmed;
+                store.updateContactPerson(
+                  projectId,
+                  gewerkId,
+                  module.id,
+                  person.id,
+                  name: person.name,
+                  phone: person.phone,
+                  role: trimmed,
+                  actor: actor,
+                );
+              },
+            ),
           ),
           if (widget.showContactEmail)
             Padding(

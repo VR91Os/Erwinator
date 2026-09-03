@@ -121,19 +121,35 @@ class _FinanceModuleWidgetState extends State<FinanceModuleWidget> {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Align(
-            alignment: Alignment.centerRight,
-            child: SegmentedButton<_AmountDisplay>(
-              segments: const [
-                ButtonSegment(value: _AmountDisplay.gross, label: Text("Brutto")),
-                ButtonSegment(value: _AmountDisplay.net, label: Text("Netto")),
-                ButtonSegment(value: _AmountDisplay.both, label: Text("Beide")),
+          Padding(
+            padding: const EdgeInsets.only(top: 2, bottom: 10),
+            child: Row(
+              children: [
+                const Text(
+                  "Anzeige",
+                  style: TextStyle(
+                    fontSize: 12,
+                    fontWeight: FontWeight.w600,
+                    color: Colors.grey,
+                  ),
+                ),
+                const SizedBox(width: 10),
+                SegmentedButton<_AmountDisplay>(
+                  style: const ButtonStyle(
+                    visualDensity: VisualDensity.compact,
+                    tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                  ),
+                  segments: const [
+                    ButtonSegment(value: _AmountDisplay.gross, label: Text("Brutto")),
+                    ButtonSegment(value: _AmountDisplay.net, label: Text("Netto")),
+                    ButtonSegment(value: _AmountDisplay.both, label: Text("Beide")),
+                  ],
+                  selected: {_display},
+                  onSelectionChanged: (s) => setState(() => _display = s.first),
+                ),
               ],
-              selected: {_display},
-              onSelectionChanged: (s) => setState(() => _display = s.first),
             ),
           ),
-          const SizedBox(height: 8),
           if (entries.isEmpty)
             const Padding(
               padding: EdgeInsets.symmetric(vertical: 6),
