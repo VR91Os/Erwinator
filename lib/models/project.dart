@@ -87,6 +87,11 @@ class Project {
   bool financeEnabled;
   List<FinanceEntry> financeEntries;
 
+  // Projektweiter, optionaler "Helfer"-Reiter: sammelt die Helferbedarf-
+  // Verwaltung (Bedarf/Zusagen, siehe helperDemands oben) plus einen
+  // großen Kalender in einem eigenen Reiter statt mitten im Überblick.
+  bool helferEnabled;
+
   // Projektweit: zeigt/erfasst ein Email-Feld je Person im Kontakt-Modul
   // (siehe overview_settings_screen.dart) - standardmäßig aus, damit das
   // Kontakt-Modul im Regelfall auf Name/Telefon beschränkt bleibt.
@@ -141,6 +146,7 @@ class Project {
     List<PresenceEntry>? onSitePresence,
     this.financeEnabled = false,
     List<FinanceEntry>? financeEntries,
+    this.helferEnabled = false,
     this.showContactEmail = false,
     List<String>? tabOrder,
     DateTime? updatedAt,
@@ -181,6 +187,7 @@ class Project {
         'onSitePresence': onSitePresence.map((e) => e.toMap()).toList(),
         'financeEnabled': financeEnabled,
         'financeEntries': financeEntries.map((e) => e.toMap()).toList(),
+        'helferEnabled': helferEnabled,
         'showContactEmail': showContactEmail,
         'tabOrder': tabOrder,
         'updatedAt': updatedAt.toIso8601String(),
@@ -229,6 +236,7 @@ class Project {
         financeEntries: (map['financeEntries'] as List<dynamic>? ?? [])
             .map((e) => FinanceEntry.fromMap(e as Map<String, dynamic>))
             .toList(),
+        helferEnabled: map['helferEnabled'] as bool? ?? false,
         showContactEmail: map['showContactEmail'] as bool? ?? false,
         tabOrder: (map['tabOrder'] as List<dynamic>? ?? [])
             .map((e) => e as String)
@@ -304,6 +312,7 @@ class Project {
       extendedTimeCalendar: winner.extendedTimeCalendar,
       activeWorkTimeProfileId: winner.activeWorkTimeProfileId,
       financeEnabled: winner.financeEnabled,
+      helferEnabled: winner.helferEnabled,
       showContactEmail: winner.showContactEmail,
       tabOrder: winner.tabOrder,
       updatedAt: winner.updatedAt,

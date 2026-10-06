@@ -21,6 +21,7 @@ import '../widgets/modules/todo_module_widget.dart';
 import '../utils/safe_notify.dart';
 import '../utils/task_urgency.dart';
 import '../widgets/file_archive_tab.dart';
+import '../widgets/helfer_tab.dart';
 import '../widgets/overview_tab.dart';
 import '../widgets/time_tracking_section.dart';
 import 'gewerk_settings_screen.dart';
@@ -30,6 +31,7 @@ const _overviewTabId = '__overview__';
 const _fileArchiveTabId = '__files__';
 const _timeTrackingTabId = '__time__';
 const _financeOverviewTabId = '__finance__';
+const _helferTabId = '__helfer__';
 
 class _TabDef {
   final String id;
@@ -103,11 +105,17 @@ class _GewerkeScreenState extends State<GewerkeScreen> {
         selectedTabId == _timeTrackingTabId && project.timeTrackingEnabled;
     final isFinanceOverview =
         selectedTabId == _financeOverviewTabId && project.financeEnabled;
+    final isHelfer = selectedTabId == _helferTabId && project.helferEnabled;
     final isOverview = !isFileArchive &&
         !isTimeTracking &&
         !isFinanceOverview &&
+        !isHelfer &&
         (selectedTabId == _overviewTabId || selectedGewerkIndex == -1);
-    final isFixedTab = isOverview || isFileArchive || isTimeTracking || isFinanceOverview;
+    final isFixedTab = isOverview ||
+        isFileArchive ||
+        isTimeTracking ||
+        isFinanceOverview ||
+        isHelfer;
     final selectedGewerk = isFixedTab ? null : project.gewerke[selectedGewerkIndex];
 
     final tabs = _orderedTabs(project);
@@ -116,6 +124,7 @@ class _GewerkeScreenState extends State<GewerkeScreen> {
         selectedTabId == _fileArchiveTabId ||
         isTimeTracking ||
         isFinanceOverview ||
+        isHelfer ||
         selectedGewerkIndex != -1;
     if (!tabStillValid) {
       // Reiter wurde entfernt oder Zeitstatistik/Finanzen deaktiviert ->
@@ -138,15 +147,17 @@ class _GewerkeScreenState extends State<GewerkeScreen> {
                     ? "Zeitstatistik"
                     : isFinanceOverview
                         ? "Finanzen"
-                        : selectedGewerk!.name,
+                        : isHelfer
+                            ? "Helfer"
+                            : selectedGewerk!.name,
         context,
         true,
         // ✅ Plus erzeugt immer die Ebene direkt unter der aktuellen Ansicht.
-        // In der Dateiablage/Zeitstatistik/Finanzen gibt es keine eigene
-        // "Anlegen"-Aktion.
+        // In der Dateiablage/Zeitstatistik/Finanzen/Helfer gibt es keine
+        // eigene "Anlegen"-Aktion.
         onCreate: isOverview
             ? () => showNewGewerkDialog(context, project.id)
-            : (isFileArchive || isTimeTracking || isFinanceOverview)
+            : (isFileArchive || isTimeTracking || isFinanceOverview || isHelfer)
                 ? null
                 : () => showModulePickerDialog(
                     context, project.id, selectedGewerk!.id),
@@ -163,7 +174,7 @@ class _GewerkeScreenState extends State<GewerkeScreen> {
                         OverviewSettingsScreen(projectId: project.id),
                   ),
                 )
-            : (isFileArchive || isTimeTracking || isFinanceOverview)
+            : (isFileArchive || isTimeTracking || isFinanceOverview || isHelfer)
                 ? null
                 : () => Navigator.push(
                       context,
@@ -181,7 +192,7 @@ class _GewerkeScreenState extends State<GewerkeScreen> {
           SizedBox(
             height: 60,
             child: _buildTabBar(context, store, project, tabs, isFileArchive,
-                isTimeTracking, isFinanceOverview),
+                isTimeTracking, isFinanceOverview, isHelfer),
           ),
           Expanded(
             // ✅ Rechts/links wischen wechselt zum vorherigen/nächsten Reiter
@@ -204,8 +215,10 @@ class _GewerkeScreenState extends State<GewerkeScreen> {
                             ? TimeTrackingSection(project: project)
                             : isFinanceOverview
                                 ? FinanceOverviewSection(project: project)
-                                : _buildGewerkContent(
-                                    store, project, selectedGewerk!),
+                                : isHelfer
+                                    ? HelferTab(project: project)
+                                    : _buildGewerkContent(
+                                        store, project, selectedGewerk!),
               ),
             ),
           ),
@@ -241,6 +254,8 @@ class _GewerkeScreenState extends State<GewerkeScreen> {
       if (project.financeEnabled)
         const _TabDef(
             id: _financeOverviewTabId, label: "Finanzen", accent: true),
+      if (project.helferEnabled)
+        const _TabDef(id: _helferTabId, label: "Helfer", accent: true),
     ];
 
     final byId = {for (final t in defaultTabs) t.id: t};
@@ -280,6 +295,7 @@ class _GewerkeScreenState extends State<GewerkeScreen> {
     bool isFileArchive,
     bool isTimeTracking,
     bool isFinanceOverview,
+    bool isHelfer,
   ) {
     return ReorderableListView.builder(
       scrollDirection: Axis.horizontal,
@@ -301,7 +317,9 @@ class _GewerkeScreenState extends State<GewerkeScreen> {
                     ? isTimeTracking
                     : tab.id == _financeOverviewTabId
                         ? isFinanceOverview
-                        : selectedTabId == tab.id;
+                        : tab.id == _helferTabId
+                            ? isHelfer
+                            : selectedTabId == tab.id;
         return ReorderableDelayedDragStartListener(
           key: ValueKey(tab.id),
           index: index,

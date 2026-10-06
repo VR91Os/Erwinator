@@ -288,6 +288,27 @@ class _OverviewSettingsScreenState extends State<OverviewSettingsScreen> {
           ),
           const Divider(height: 40),
           const Text(
+            "Helfer",
+            style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
+          ),
+          const SizedBox(height: 4),
+          const Text(
+            "Optionaler Reiter für Helferbedarf und Zusagen: Bedarf je Tag "
+            "eintragen, Helfer zusagen lassen und einen größeren Kalender "
+            "mit Farbcodierung dafür. Bisher war das Teil des Überblicks.",
+            style: TextStyle(color: Colors.grey),
+          ),
+          CheckboxListTile(
+            contentPadding: EdgeInsets.zero,
+            title: const Text("Helfer-Reiter aktivieren"),
+            value: project.helferEnabled,
+            onChanged: (value) => store.updateHelferEnabled(
+              widget.projectId,
+              enabled: value ?? false,
+            ),
+          ),
+          const Divider(height: 40),
+          const Text(
             "Projekt teilen",
             style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
           ),

@@ -3,6 +3,7 @@ import 'dart:convert';
 import 'package:shared_preferences/shared_preferences.dart';
 
 import '../models/app_settings.dart';
+import '../utils/schema_migration.dart';
 
 abstract class SettingsRepository {
   Future<AppSettings> loadSettings();
@@ -22,13 +23,22 @@ class LocalSettingsRepository implements SettingsRepository {
     if (content == null || content.trim().isEmpty) {
       return AppSettings();
     }
-    final decoded = jsonDecode(content) as Map<String, dynamic>;
-    return AppSettings.fromMap(decoded);
+    final decoded = jsonDecode(content);
+    final data = migrate(
+      rawDecoded: decoded,
+      currentVersion: currentSettingsSchemaVersion,
+      steps: settingsMigrationSteps,
+    ) as Map<String, dynamic>;
+    return AppSettings.fromMap(data);
   }
 
   @override
   Future<void> saveSettings(AppSettings settings) async {
     final prefs = await SharedPreferences.getInstance();
-    await prefs.setString(_key, jsonEncode(settings.toMap()));
+    final payload = wrap(
+      version: currentSettingsSchemaVersion,
+      data: settings.toMap(),
+    );
+    await prefs.setString(_key, jsonEncode(payload));
   }
 }

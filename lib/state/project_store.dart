@@ -1597,6 +1597,18 @@ class ProjectStore extends ChangeNotifier {
     await _persist(projectId);
   }
 
+  Future<void> updateHelferEnabled(
+    String projectId, {
+    required bool enabled,
+  }) async {
+    final project = _project(projectId);
+    if (project == null) return;
+    project.helferEnabled = enabled;
+    project.updatedAt = DateTime.now();
+    notifyListeners();
+    await _persist(projectId);
+  }
+
   Future<void> updateShowContactEmail(
     String projectId, {
     required bool enabled,
