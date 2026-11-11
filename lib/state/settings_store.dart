@@ -3,6 +3,7 @@ import 'package:flutter/foundation.dart';
 import '../models/app_settings.dart';
 import '../models/team_member.dart';
 import '../repositories/settings_repository.dart';
+import '../services/error_log_service.dart';
 import '../utils/id_generator.dart';
 import '../utils/kurzzeichen.dart';
 
@@ -14,6 +15,12 @@ class SettingsStore extends ChangeNotifier {
 
   AppSettings settings = AppSettings();
   bool isLoading = true;
+
+  // Siehe ProjectStore.loadFailed - dieselbe Absicherung: nach einem
+  // fehlgeschlagenen Laden nie wieder speichern, damit die (fälschlich auf
+  // Standard zurückgefallenen) Einstellungen die echten, noch intakt
+  // gespeicherten Daten nicht überschreiben.
+  bool loadFailed = false;
 
   // Kurzzeichen für Aktionen des lokalen Nutzers, mit Fallback solange kein
   // Profil angelegt wurde.
@@ -32,14 +39,19 @@ class SettingsStore extends ChangeNotifier {
     // ohne Persistenz nutzbar, statt beim Start abzustürzen.
     try {
       settings = await _repository.loadSettings();
-    } catch (_) {
+    } catch (e, stack) {
       settings = AppSettings();
+      loadFailed = true;
+      ErrorLogService.instance
+          .record('Einstellungen konnten nicht geladen werden', '$e\n$stack');
     }
     isLoading = false;
     notifyListeners();
   }
 
   Future<void> _persist() async {
+    // Siehe loadFailed-Kommentar oben.
+    if (loadFailed) return;
     try {
       await _repository.saveSettings(settings);
     } catch (_) {}

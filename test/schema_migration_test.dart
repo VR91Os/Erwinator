@@ -10,7 +10,7 @@ import 'package:baustelli/utils/schema_migration.dart';
 void main() {
   group('schema_migration.migrate/wrap', () {
     test('legacy bare List (Projekte vor dem Umschlag) wird unverändert '
-        'als Daten erkannt', () {
+        'als Daten erkannt und als migriert markiert', () {
       final legacy = [
         {'id': 'p1', 'name': 'Haus A'},
       ];
@@ -19,22 +19,24 @@ void main() {
         currentVersion: currentProjectSchemaVersion,
         steps: projectMigrationSteps,
       );
-      expect(result, legacy);
+      expect(result.data, legacy);
+      expect(result.migrated, isTrue);
     });
 
     test('legacy bare Map (Settings vor dem Umschlag) wird unverändert '
-        'als Daten erkannt', () {
+        'als Daten erkannt und als migriert markiert', () {
       final legacy = {'userName': 'Max'};
       final result = migrate(
         rawDecoded: legacy,
         currentVersion: currentSettingsSchemaVersion,
         steps: settingsMigrationSteps,
       );
-      expect(result, legacy);
+      expect(result.data, legacy);
+      expect(result.migrated, isTrue);
     });
 
     test('bereits verpackter Umschlag liefert die Nutzdaten unverändert '
-        'zurück, unabhängig vom Inhalt', () {
+        'zurück und gilt nicht als migriert', () {
       final data = [
         {'id': 'p1'}
       ];
@@ -44,7 +46,8 @@ void main() {
         currentVersion: currentProjectSchemaVersion,
         steps: projectMigrationSteps,
       );
-      expect(result, data);
+      expect(result.data, data);
+      expect(result.migrated, isFalse);
     });
   });
 
@@ -78,6 +81,27 @@ void main() {
       expect(reloaded, hasLength(1));
       expect(reloaded.single.name, 'Projekt X');
     });
+
+    test('beim Laden eines alten, unverpackten Formats wird vor dem ersten '
+        'erneuten Speichern ein Backup der rohen Rohdaten angelegt', () async {
+      const raw = '[{"id":"p1","name":"Altes Projekt"}]';
+      SharedPreferences.setMockInitialValues({'baustelli_data': raw});
+      final repo = LocalProjectRepository();
+      await repo.loadProjects();
+
+      final prefs = await SharedPreferences.getInstance();
+      expect(prefs.getString('baustelli_data_backup'), raw);
+    });
+
+    test('beim Laden eines bereits aktuellen Umschlags wird KEIN Backup '
+        'angelegt', () async {
+      final repo = LocalProjectRepository();
+      await repo.saveProjects([Project('p1', 'Projekt X')]);
+      await repo.loadProjects();
+
+      final prefs = await SharedPreferences.getInstance();
+      expect(prefs.getString('baustelli_data_backup'), isNull);
+    });
   });
 
   group('LocalSettingsRepository liest altes, unverpacktes Format', () {
@@ -107,6 +131,17 @@ void main() {
 
       final reloaded = await repo.loadSettings();
       expect(reloaded.userName, 'Neu');
+    });
+
+    test('beim Laden eines alten, unverpackten Formats wird vor dem ersten '
+        'erneuten Speichern ein Backup der rohen Rohdaten angelegt', () async {
+      const raw = '{"userName":"Alte Einstellung"}';
+      SharedPreferences.setMockInitialValues({'baustelli_settings': raw});
+      final repo = LocalSettingsRepository();
+      await repo.loadSettings();
+
+      final prefs = await SharedPreferences.getInstance();
+      expect(prefs.getString('baustelli_settings_backup'), raw);
     });
   });
 }

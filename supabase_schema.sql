@@ -51,8 +51,19 @@ $$;
 create policy "owner full access" on shared_projects
   for all using (owner_id = auth.uid()) with check (owner_id = auth.uid());
 
-create policy "members read/write" on shared_projects
-  for all using (is_approved_member(id))
+-- ⚠️ Bewusst NUR select/update (nicht "for all"): "for all" hätte Mitgliedern
+-- auch DELETE erlaubt - jede(r) genehmigte Mitarbeiter:in hätte damit per
+-- direktem API-Aufruf (nicht nur über die App-UI) die komplette geteilte
+-- Projekt-Zeile löschen können (inkl. Kaskaden-Löschung aller
+-- project_members), obwohl die App selbst dafür nie einen Lösch-Aufruf
+-- macht. Löschen bleibt dem Owner vorbehalten (siehe "owner full access"
+-- oben) - aktuell löscht aber auch die App selbst nie, das ist also der
+-- Normalzustand, kein Feature-Verlust.
+create policy "members can read" on shared_projects
+  for select using (is_approved_member(id));
+
+create policy "members can update data" on shared_projects
+  for update using (is_approved_member(id))
   with check (is_approved_member(id));
 
 -- Postgres RLS "with check" sieht nur die NEUE Zeile, nicht die alte - ein

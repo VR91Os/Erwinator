@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 
 import '../models/project.dart';
+import '../services/update_check_service.dart';
 import '../state/project_store.dart';
 import '../state/settings_store.dart';
 import '../utils/file_export.dart';
@@ -12,6 +13,7 @@ import '../utils/profile_prompt.dart';
 import '../widgets/app_bar.dart';
 import '../widgets/dialogs/new_project_dialog.dart';
 import '../widgets/project_card.dart';
+import '../widgets/update_dialog.dart';
 import 'documentation_screen.dart';
 import 'gewerke_screen.dart';
 import 'join_project_screen.dart';
@@ -26,6 +28,21 @@ class StartScreen extends StatefulWidget {
 class _StartScreenState extends State<StartScreen> {
   // ✅ verhindert, dass der Auto-Sprung bei jedem Rebuild erneut ausgelöst wird
   bool _autoJumpChecked = false;
+
+  @override
+  void initState() {
+    super.initState();
+    // ✅ Still im Hintergrund, blockiert den Start nicht - zeigt nur bei
+    // tatsächlich gefundenem Update einen Hinweis (siehe
+    // UpdateCheckService: höchstens alle 24h ein echter Request, Fehler
+    // werden intern geschluckt statt hier anzukommen).
+    WidgetsBinding.instance.addPostFrameCallback((_) async {
+      final update = await UpdateCheckService.instance.checkForUpdate();
+      if (update != null && mounted) {
+        showUpdateAvailableDialog(context, update);
+      }
+    });
+  }
 
   void _openProject(BuildContext context, String projectId) {
     context.read<SettingsStore>().setLastProject(projectId);
@@ -68,7 +85,10 @@ class _StartScreenState extends State<StartScreen> {
     final store = context.watch<ProjectStore>();
     final settingsStore = context.watch<SettingsStore>();
 
-    if (!_autoJumpChecked && !store.isLoading && !settingsStore.isLoading) {
+    if (!_autoJumpChecked &&
+        !store.isLoading &&
+        !store.loadFailed &&
+        !settingsStore.isLoading) {
       _autoJumpChecked = true;
       final lastId = settingsStore.settings.lastProjectId;
       final shouldJump = settingsStore.settings.jumpToLastProject &&
@@ -86,12 +106,43 @@ class _StartScreenState extends State<StartScreen> {
         "Erwinator",
         context,
         false,
-        onCreate: () => showNewProjectDialog(context),
+        onCreate:
+            store.loadFailed ? null : () => showNewProjectDialog(context),
         createTooltip: "Neues Projekt",
       ),
       body: store.isLoading
           ? const Center(child: CircularProgressIndicator())
-          : ListView(
+          : store.loadFailed
+              ? Center(
+                  child: Padding(
+                    padding: const EdgeInsets.all(24),
+                    child: Column(
+                      mainAxisAlignment: MainAxisAlignment.center,
+                      children: [
+                        const Icon(Icons.error_outline,
+                            color: Colors.red, size: 48),
+                        const SizedBox(height: 16),
+                        const Text(
+                          "Deine gespeicherten Daten konnten nicht geladen "
+                          "werden. Nichts wurde gelöscht — deine Projekte "
+                          "sind weiterhin auf dem Gerät vorhanden, konnten "
+                          "nur nicht gelesen werden. Es wird solange auch "
+                          "nichts mehr gespeichert, um sie nicht zu "
+                          "überschreiben.",
+                          textAlign: TextAlign.center,
+                        ),
+                        const SizedBox(height: 8),
+                        const Text(
+                          "Bitte Fehlerprotokoll prüfen oder Support "
+                          "kontaktieren.",
+                          textAlign: TextAlign.center,
+                          style: TextStyle(color: Colors.grey),
+                        ),
+                      ],
+                    ),
+                  ),
+                )
+              : ListView(
               padding: const EdgeInsets.all(16),
               children: [
                 ...store.projects.map((project) {

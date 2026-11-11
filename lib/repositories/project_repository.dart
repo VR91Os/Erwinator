@@ -15,6 +15,11 @@ abstract class ProjectRepository {
 // dart:io nicht verfügbar ist.
 class LocalProjectRepository implements ProjectRepository {
   static const _key = 'baustelli_data';
+  // Rohe, unmigrierte Fassung - wird nur geschrieben, wenn beim Laden
+  // tatsächlich migriert wurde (siehe loadProjects()), als manuell
+  // wiederherstellbare Rückfalloption, falls sich ein Fehler in einem
+  // Migrationsschritt erst später zeigt. Nie automatisch gelesen.
+  static const _backupKey = 'baustelli_data_backup';
 
   @override
   Future<List<Project>> loadProjects() async {
@@ -24,11 +29,22 @@ class LocalProjectRepository implements ProjectRepository {
       return [];
     }
     final decoded = jsonDecode(content);
-    final data = migrate(
+    final result = migrate(
       rawDecoded: decoded,
       currentVersion: currentProjectSchemaVersion,
       steps: projectMigrationSteps,
-    ) as List<dynamic>;
+    );
+    if (result.migrated) {
+      // Das Backup ist eine reine Zusatz-Absicherung - scheitert nur dieser
+      // Schreibvorgang (z.B. localStorage-Quota im Web voll), darf das
+      // NICHT dazu führen, dass die gerade erfolgreich geladenen/migrierten
+      // Projektdaten verworfen werden (loadProjects() würde sonst eine
+      // Exception werfen, obwohl das Laden an sich geklappt hat).
+      try {
+        await prefs.setString(_backupKey, content);
+      } catch (_) {}
+    }
+    final data = result.data as List<dynamic>;
     return data
         .map((e) => Project.fromMap(e as Map<String, dynamic>))
         .toList();

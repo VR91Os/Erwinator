@@ -15,6 +15,8 @@ abstract class SettingsRepository {
 // dart:io nicht verfügbar ist.
 class LocalSettingsRepository implements SettingsRepository {
   static const _key = 'baustelli_settings';
+  // Siehe LocalProjectRepository._backupKey - gleiches Prinzip.
+  static const _backupKey = 'baustelli_settings_backup';
 
   @override
   Future<AppSettings> loadSettings() async {
@@ -24,11 +26,20 @@ class LocalSettingsRepository implements SettingsRepository {
       return AppSettings();
     }
     final decoded = jsonDecode(content);
-    final data = migrate(
+    final result = migrate(
       rawDecoded: decoded,
       currentVersion: currentSettingsSchemaVersion,
       steps: settingsMigrationSteps,
-    ) as Map<String, dynamic>;
+    );
+    if (result.migrated) {
+      // Siehe LocalProjectRepository.loadProjects(): das Backup ist eine
+      // Zusatz-Absicherung, ein Fehlschlag dabei darf die erfolgreich
+      // geladenen Einstellungen nicht verwerfen.
+      try {
+        await prefs.setString(_backupKey, content);
+      } catch (_) {}
+    }
+    final data = result.data as Map<String, dynamic>;
     return AppSettings.fromMap(data);
   }
 

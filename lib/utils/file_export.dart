@@ -10,19 +10,17 @@ import 'package:path_provider/path_provider.dart';
 import '../models/modules/file_module.dart';
 
 // Speichert Text als Datei: im Browser als Download, auf Desktop über den
-// System-Speichern-Dialog.
+// System-Speichern-Dialog, auf Android/iOS direkt am gewählten Ort.
+// [bytes] MUSS an saveFile übergeben werden - Android/iOS wirft sonst einen
+// ArgumentError ("bytes" parameter is required), da die Datei dort anders
+// als am Desktop nicht mehr über einen zurückgegebenen, separat
+// beschreibbaren Pfad gespeichert werden kann.
 Future<void> exportTextFile({
   required String fileName,
   required String content,
 }) async {
   final bytes = Uint8List.fromList(utf8.encode(content));
-  if (kIsWeb) {
-    await FilePicker.saveFile(fileName: fileName, bytes: bytes);
-    return;
-  }
-  final path = await FilePicker.saveFile(fileName: fileName);
-  if (path == null) return;
-  await io.File(path).writeAsBytes(bytes);
+  await FilePicker.saveFile(fileName: fileName, bytes: bytes);
 }
 
 // Liest eine vom Nutzer ausgewählte Textdatei ein (z.B. für den
@@ -103,18 +101,13 @@ Future<PickedFileInfo?> pickFileInfo() async {
 
 // Speichert Binärdaten als Datei: im Browser als Download, auf
 // Desktop/Mobile über den System-Speichern-Dialog. Für den Rückweg aus der
-// File-Ablage (Datei wieder abrufen).
+// File-Ablage (Datei wieder abrufen). [bytes] MUSS übergeben werden, siehe
+// Kommentar bei exportTextFile.
 Future<void> exportBinaryFile({
   required String fileName,
   required Uint8List bytes,
 }) async {
-  if (kIsWeb) {
-    await FilePicker.saveFile(fileName: fileName, bytes: bytes);
-    return;
-  }
-  final path = await FilePicker.saveFile(fileName: fileName);
-  if (path == null) return;
-  await io.File(path).writeAsBytes(bytes);
+  await FilePicker.saveFile(fileName: fileName, bytes: bytes);
 }
 
 // Speichert eine einzelne Version einer File-Ablage-Datei wieder auf dem

@@ -2,12 +2,14 @@ import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 
 import '../services/error_log_service.dart';
+import '../services/update_check_service.dart';
 import '../state/project_store.dart';
 import '../state/settings_store.dart';
 import '../utils/holidays.dart';
 import '../utils/kurzzeichen.dart';
 import '../utils/safe_notify.dart';
 import '../widgets/app_bar.dart';
+import '../widgets/update_dialog.dart';
 import 'error_log_screen.dart';
 
 class SettingsScreen extends StatefulWidget {
@@ -20,6 +22,7 @@ class SettingsScreen extends StatefulWidget {
 class _SettingsScreenState extends State<SettingsScreen> {
   late final TextEditingController _nameController;
   late final TextEditingController _googleController;
+  bool _checkingUpdate = false;
 
   @override
   void initState() {
@@ -55,6 +58,20 @@ class _SettingsScreenState extends State<SettingsScreen> {
     ScaffoldMessenger.of(context).showSnackBar(
       const SnackBar(content: Text("Gespeichert")),
     );
+  }
+
+  Future<void> _checkForUpdate() async {
+    setState(() => _checkingUpdate = true);
+    final update = await UpdateCheckService.instance.checkForUpdate(force: true);
+    if (!mounted) return;
+    setState(() => _checkingUpdate = false);
+    if (update == null) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text("Du bist auf dem neuesten Stand")),
+      );
+      return;
+    }
+    showUpdateAvailableDialog(context, update);
   }
 
   void _showInviteDialog() {
@@ -106,7 +123,8 @@ class _SettingsScreenState extends State<SettingsScreen> {
 
   @override
   Widget build(BuildContext context) {
-    final settings = context.watch<SettingsStore>().settings;
+    final settingsStore = context.watch<SettingsStore>();
+    final settings = settingsStore.settings;
     final kurzzeichenPreview = _nameController.text.trim().isEmpty
         ? '—'
         : generateKurzzeichen(
@@ -119,6 +137,22 @@ class _SettingsScreenState extends State<SettingsScreen> {
       body: ListView(
         padding: const EdgeInsets.all(16),
         children: [
+          if (settingsStore.loadFailed)
+            Container(
+              margin: const EdgeInsets.only(bottom: 16),
+              padding: const EdgeInsets.all(12),
+              decoration: BoxDecoration(
+                color: Colors.red.shade50,
+                border: Border.all(color: Colors.red.shade200),
+                borderRadius: BorderRadius.circular(8),
+              ),
+              child: const Text(
+                "Deine gespeicherten Einstellungen konnten nicht geladen "
+                "werden. Änderungen hier werden deshalb gerade NICHT "
+                "gespeichert, bis das Problem behoben ist.",
+                style: TextStyle(color: Colors.red),
+              ),
+            ),
           CheckboxListTile(
             contentPadding: EdgeInsets.zero,
             title: const Text("Beim Start ins letzte Projekt springen"),
@@ -255,6 +289,24 @@ class _SettingsScreenState extends State<SettingsScreen> {
             onPressed: _showInviteDialog,
             icon: const Icon(Icons.person_add_alt),
             label: const Text("Team-Mitglied hinzufügen"),
+          ),
+          const Divider(height: 32),
+
+          const Text(
+            "App-Update",
+            style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
+          ),
+          const SizedBox(height: 8),
+          OutlinedButton.icon(
+            onPressed: _checkingUpdate ? null : _checkForUpdate,
+            icon: _checkingUpdate
+                ? const SizedBox(
+                    height: 16,
+                    width: 16,
+                    child: CircularProgressIndicator(strokeWidth: 2),
+                  )
+                : const Icon(Icons.system_update_outlined),
+            label: const Text("Nach Updates suchen"),
           ),
           const Divider(height: 32),
 

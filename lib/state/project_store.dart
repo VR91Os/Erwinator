@@ -54,13 +54,28 @@ class ProjectStore extends ChangeNotifier {
   List<Project> projects = [];
   bool isLoading = true;
 
+  // Schlägt das Laden fehl (kaputtes JSON, Bug in einem Migrationsschritt,
+  // ...), bleibt dieses Flag dauerhaft gesetzt: die App läuft weiter, aber
+  // _persist() wird zum No-Op (siehe dort). Ohne diese Sperre würde ein
+  // Lesefehler sonst dazu führen, dass die fälschlich leere In-Memory-Liste
+  // bei der nächsten Aktion die echten, in SharedPreferences noch intakt
+  // liegenden Daten überschreibt - der Nutzer hätte seine Projekte
+  // "verloren", obwohl sie technisch nie wirklich weg waren.
+  bool loadFailed = false;
+
   Future<void> init() async {
     // Auf Plattformen ohne Dateisystem-Zugriff (z.B. Web) bleibt die App
     // ohne Persistenz nutzbar, statt beim Start abzustürzen.
     try {
       projects = await _repository.loadProjects();
-    } catch (_) {
+    } catch (e, stack) {
       projects = [];
+      loadFailed = true;
+      ErrorLogService.instance
+          .record('Projekte konnten nicht geladen werden', '$e\n$stack');
+      isLoading = false;
+      notifyListeners();
+      return;
     }
     // Direkt lokal sichern statt erst auf die nächste ohnehin anstehende
     // Änderung zu warten - sonst wächst die gespeicherte JSON-Datei bei
@@ -110,6 +125,12 @@ class ProjectStore extends ChangeNotifier {
       if (index == -1) return;
       projects[index] = projects[index].mergeFrom(updated);
       notifyListeners();
+      // Direkter Repository-Aufruf statt _persist() (hier reicht ein
+      // lokales Speichern, kein erneuter Cloud-Push nötig - die Änderung
+      // kommt ja gerade erst von dort) - braucht daher denselben
+      // loadFailed-Schutz explizit, statt sich implizit darauf zu
+      // verlassen, dass "projects" in diesem Zustand ohnehin leer ist.
+      if (loadFailed) return;
       _repository.saveProjects(projects).catchError((e, stack) {
         ErrorLogService.instance
             .record('Lokales Speichern fehlgeschlagen', '$e\n$stack');
@@ -203,6 +224,11 @@ class ProjectStore extends ChangeNotifier {
   // Projekten ohne bekannte sharedId) synct sicherheitshalber weiterhin
   // alle.
   Future<void> _persist([String? changedProjectId]) async {
+    // Siehe loadFailed-Kommentar oben: nach einem fehlgeschlagenen Laden
+    // NIE speichern, sonst würde die (fälschlich leere/unvollständige)
+    // In-Memory-Liste die echten, noch intakten gespeicherten Daten
+    // überschreiben.
+    if (loadFailed) return;
     try {
       await _repository.saveProjects(projects);
     } catch (e, stack) {
@@ -325,6 +351,11 @@ class ProjectStore extends ChangeNotifier {
     }
     projects.removeWhere((p) => p.id == projectId);
     notifyListeners();
+    // Direkter Repository-Aufruf statt _persist() (kein Cloud-Sync beim
+    // reinen lokalen Entfernen nötig) - siehe loadFailed-Kommentar in
+    // _subscribeToProject: derselbe explizite Schutz, statt sich implizit
+    // auf eine leere Projektliste zu verlassen.
+    if (loadFailed) return;
     try {
       await _repository.saveProjects(projects);
     } catch (e, stack) {

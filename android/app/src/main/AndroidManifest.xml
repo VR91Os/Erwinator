@@ -10,7 +10,20 @@
     <application
         android:label="Erwinator"
         android:name="${applicationName}"
-        android:icon="@mipmap/ic_launcher">
+        android:icon="@mipmap/ic_launcher"
+        android:allowBackup="false"
+        android:fullBackupContent="false">
+        <!-- allowBackup="false": ohne diese Einstellung gilt Androids
+             Standard (true), wodurch die komplette App-Ablage (alle
+             Projekte/Aufgaben/Finanzen/Kontakte, unverschlüsselt in
+             SharedPreferences) sowohl in Googles automatisches Cloud-Backup
+             einfließt als auch per "adb backup"/"adb restore" OHNE Root
+             ausgelesen bzw. durch eine manipulierte Fassung ersetzt werden
+             könnte, sobald USB-Debugging aktiv ist. Nachteil: beim
+             Geräte-Wechsel wird die lokale Ablage nicht mehr automatisch
+             von Android mit übernommen (geteilte Projekte bleiben davon
+             unberührt, die liegen ja in Supabase). -->
+
         <receiver android:exported="false" android:name="com.dexterous.flutterlocalnotifications.ScheduledNotificationReceiver" />
         <receiver android:exported="false" android:name="com.dexterous.flutterlocalnotifications.ScheduledNotificationBootReceiver">
             <intent-filter>

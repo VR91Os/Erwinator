@@ -15,13 +15,24 @@
 
 typedef MigrationStep = dynamic Function(dynamic data);
 
+// [migrated] ist true, wenn tatsächlich mindestens ein Migrationsschritt
+// gelaufen ist (die gespeicherte Version war älter als currentVersion) -
+// genau dann lohnt sich ein Backup des rohen, unmigrierten JSON-Strings vor
+// dem nächsten Speichern (siehe Repositories), als Rückfalloption, falls
+// sich ein Fehler in einem Migrationsschritt erst später zeigt.
+class MigrationResult {
+  final dynamic data;
+  final bool migrated;
+  MigrationResult({required this.data, required this.migrated});
+}
+
 // Normalisiert rohes, bereits per jsonDecode gewonnenes JSON auf die
 // aktuelle Version: erkennt das alte, unverpackte Format (bare List/Map
 // ohne "schemaVersion"-Key) als implizite Version 1 und wendet alle
 // nötigen Migrationsschritte sequenziell bis currentVersion an. Gibt die
 // (migrierten) Nutzdaten zurück, bereit für die bestehenden
 // fromMap()-Factories.
-dynamic migrate({
+MigrationResult migrate({
   required dynamic rawDecoded,
   required int currentVersion,
   required List<MigrationStep> steps,
@@ -38,10 +49,11 @@ dynamic migrate({
     version = 1;
     data = rawDecoded;
   }
+  final migrated = version < currentVersion;
   for (var v = version; v < currentVersion; v++) {
     data = steps[v - 1](data);
   }
-  return data;
+  return MigrationResult(data: data, migrated: migrated);
 }
 
 // Verpackt Nutzdaten für den Save-Pfad in den aktuellen Umschlag.
